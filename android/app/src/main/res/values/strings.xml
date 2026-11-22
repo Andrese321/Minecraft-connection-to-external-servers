@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bedrock LAN Proxy</string>
+    <string name="title">Conecta tu consola a cualquier servidor Bedrock</string>
+    <string name="hint_host">IP o dominio del servidor</string>
+    <string name="hint_port">Puerto</string>
+    <string name="hint_name">Nombre en la lista LAN (opcional)</string>
+    <string name="start">▶  Iniciar partida LAN</string>
+    <string name="stop">■  Detener</string>
+    <string name="test">Probar servidor</string>
+    <string name="save">★ Guardar</string>
+    <string name="saved_servers">Servidores guardados</string>
+    <string name="saved_empty">Todavía no hay servidores guardados. Escribe uno y pulsa «★ Guardar».</string>
+    <string name="log">Registro</string>
+    <string name="how_to">Cómo usarlo:\n1. Conecta la consola y este teléfono a la misma red Wi-Fi (o la consola al punto de acceso del teléfono).\n2. Escribe el servidor y pulsa «Iniciar partida LAN».\n3. En la consola: Minecraft → Jugar → Amigos. El servidor aparece en «Partidas LAN».\n\nDeja la app funcionando mientras juegas: todo el tráfico pasa por el teléfono. Puedes apagar la pantalla.</string>
+</resources>

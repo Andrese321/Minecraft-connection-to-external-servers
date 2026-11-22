@@ -1,0 +1,319 @@
+package com.bedrocklanproxy.core
+
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.SocketAddress
+import java.net.StandardProtocolFamily
+import java.nio.ByteBuffer
+import java.nio.channels.DatagramChannel
+import java.nio.channels.SelectionKey
+import java.nio.channels.Selector
+import java.util.concurrent.ConcurrentHashMap
+
+enum class ProxyEvent { INFO, ONLINE, OFFLINE, JOIN, LEAVE, ERROR, STOPPED }
+
+fun interface ProxyListener {
+    fun onEvent(event: ProxyEvent, message: String)
+}
+
+class ProxyException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * Proxy UDP que convierte un servidor Bedrock externo en una "partida LAN".
+ *
+ * 1. Escucha en el puerto 19132 de la red local (donde la consola busca partidas LAN).
+ * 2. Hace ping al servidor real cada pocos segundos y guarda su MOTD.
+ * 3. Responde a los pings de la consola con ese MOTD: aparece la partida LAN.
+ * 4. Reenvía el tráfico de cada consola al servidor por un canal propio, y las respuestas de vuelta.
+ */
+class LanProxy(
+    val remoteHost: String,
+    val remotePort: Int = RakNet.DEFAULT_PORT,
+    private val listenHost: String = "0.0.0.0",
+    listenPort: Int = RakNet.DEFAULT_PORT,
+    customName: String? = null,
+    private val listener: ProxyListener? = null,
+    private val pingIntervalMs: Long = 3000,
+    private val sessionTimeoutMs: Long = 30_000,
+) {
+    val customName: String? = customName?.takeIf { it.isNotBlank() }
+    val guid: Long = RakNet.randomGuid()
+
+    @Volatile var listenPort: Int = listenPort
+        private set
+    @Volatile var serverInfo: ServerInfo? = null
+        private set
+    @Volatile var latencyMs: Long? = null
+        private set
+    @Volatile var online: Boolean = false
+        private set
+    @Volatile var remoteAddress: InetSocketAddress? = null
+        private set
+
+    val running: Boolean get() = thread?.isAlive == true
+    val clientCount: Int get() = sessions.size
+
+    private class Session(val client: SocketAddress, val channel: DatagramChannel) {
+        @Volatile var lastSeen = System.nanoTime()
+        var upBytes = 0L
+        var downBytes = 0L
+    }
+
+    private val sessions = ConcurrentHashMap<SocketAddress, Session>()
+    private var lan: DatagramChannel? = null
+    private var status: DatagramChannel? = null
+    private var selector: Selector? = null
+    @Volatile private var thread: Thread? = null
+    @Volatile private var stopRequested = false
+    private var lastPong = 0L
+    private var pingSentAt = 0L
+    private val buffer: ByteBuffer = ByteBuffer.allocateDirect(MAX_DATAGRAM)
+    private val bytes = ByteArray(MAX_DATAGRAM)
+
+    // ------------------------------------------------------------------ API
+
+    /** Resuelve el servidor y abre el puerto. Bloqueante (hace DNS). */
+    @Throws(ProxyException::class)
+    fun start() {
+        if (running) return
+        val remote = try {
+            RakNet.resolve(remoteHost, remotePort)
+        } catch (e: Exception) {
+            throw ProxyException("No se pudo encontrar el servidor '$remoteHost': ${e.message}", e)
+        }
+        remoteAddress = remote
+
+        val lanChannel = try {
+            DatagramChannel.open(StandardProtocolFamily.INET).apply {
+                bind(InetSocketAddress(listenHost, listenPort))
+                configureBlocking(false)
+            }
+        } catch (e: IOException) {
+            throw ProxyException(
+                "No se pudo abrir el puerto UDP $listenPort: ${e.message}. " +
+                    "¿Está Minecraft abierto en este mismo dispositivo? Ciérralo e inténtalo de nuevo.", e,
+            )
+        }
+        listenPort = (lanChannel.localAddress as InetSocketAddress).port
+
+        val statusChannel = DatagramChannel.open().apply { configureBlocking(false) }
+        val sel = Selector.open()
+        lanChannel.register(sel, SelectionKey.OP_READ, TAG_LAN)
+        statusChannel.register(sel, SelectionKey.OP_READ, TAG_STATUS)
+
+        lan = lanChannel
+        status = statusChannel
+        selector = sel
+        stopRequested = false
+        online = false
+        serverInfo = null
+        lastPong = 0
+        thread = Thread(::run, "LanProxy").apply { isDaemon = true; start() }
+        emit(
+            ProxyEvent.INFO,
+            "Proxy iniciado en el puerto $listenPort -> $remoteHost:$remotePort (${remote.address.hostAddress})",
+        )
+    }
+
+    fun stop(timeoutMs: Long = 3000) {
+        stopRequested = true
+        selector?.wakeup()
+        thread?.join(timeoutMs)
+        thread = null
+    }
+
+    fun waitOnline(timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (online) return true
+            Thread.sleep(50)
+        }
+        return online
+    }
+
+    // ------------------------------------------------------------ internos
+
+    private fun emit(event: ProxyEvent, message: String) {
+        try {
+            listener?.onEvent(event, message)
+        } catch (_: Throwable) {
+            // la interfaz nunca debe tumbar el proxy
+        }
+    }
+
+    private fun run() {
+        val sel = selector!!
+        var nextPing = 0L
+        var nextCleanup = System.nanoTime() + 1_000_000_000L
+        try {
+            while (!stopRequested) {
+                val now = System.nanoTime()
+                if (now >= nextPing) {
+                    pingRemote(now)
+                    nextPing = now + pingIntervalMs * 1_000_000
+                }
+                if (now >= nextCleanup) {
+                    cleanup(now)
+                    nextCleanup = now + 1_000_000_000L
+                }
+                sel.select(250)
+                val it = sel.selectedKeys().iterator()
+                while (it.hasNext()) {
+                    val key = it.next()
+                    it.remove()
+                    if (!key.isValid) continue
+                    when (val tag = key.attachment()) {
+                        TAG_LAN -> readLan(sel)
+                        TAG_STATUS -> readStatus()
+                        is Session -> readSession(tag)
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            emit(ProxyEvent.ERROR, "Error inesperado en el proxy: $e")
+        } finally {
+            sessions.values.forEach { closeQuietly(it.channel) }
+            sessions.clear()
+            closeQuietly(lan)
+            closeQuietly(status)
+            try { sel.close() } catch (_: IOException) {}
+            online = false
+            emit(ProxyEvent.STOPPED, "Proxy detenido")
+        }
+    }
+
+    private fun receive(channel: DatagramChannel): Pair<SocketAddress, Int>? {
+        buffer.clear()
+        val from = try { channel.receive(buffer) } catch (_: IOException) { null } ?: return null
+        buffer.flip()
+        val n = buffer.remaining()
+        buffer.get(bytes, 0, n)
+        return from to n
+    }
+
+    // Estado del servidor remoto -------------------------------------------
+
+    private fun pingRemote(now: Long) {
+        try {
+            status!!.send(ByteBuffer.wrap(RakNet.buildPing(guid)), remoteAddress!!)
+            pingSentAt = now
+        } catch (e: IOException) {
+            emit(ProxyEvent.ERROR, "No se pudo hacer ping al servidor: ${e.message}")
+        }
+        val offlineAfter = maxOf(pingIntervalMs * 3, 5000) * 1_000_000
+        if (online && now - lastPong > offlineAfter) {
+            online = false
+            emit(ProxyEvent.OFFLINE, "El servidor no responde. La partida LAN se ocultará hasta que vuelva.")
+        }
+    }
+
+    private fun readStatus() {
+        repeat(MAX_READS_PER_WAKE) {
+            val (_, n) = receive(status!!) ?: return
+            val pong = RakNet.parsePong(bytes, n) ?: return@repeat
+            val now = System.nanoTime()
+            lastPong = now
+            if (pingSentAt != 0L) latencyMs = (now - pingSentAt) / 1_000_000
+            val info = ServerInfo.fromMotd(pong.motd, pong.guid)
+            serverInfo = info
+            if (!online) {
+                online = true
+                emit(
+                    ProxyEvent.ONLINE,
+                    "Servidor en línea: ${info.name} | ${info.version} | ${info.players}/${info.maxPlayers} " +
+                        "jugadores. Ya debería aparecer como partida LAN en la consola.",
+                )
+            }
+        }
+    }
+
+    // Tráfico de la consola -------------------------------------------------
+
+    private fun readLan(sel: Selector) {
+        repeat(MAX_READS_PER_WAKE) {
+            val (client, n) = receive(lan!!) ?: return
+            if (n == 0) return@repeat
+            if (RakNet.isPing(bytes, n)) {
+                answerPing(client, n)
+                return@repeat
+            }
+            val session = sessions[client] ?: openSession(sel, client) ?: return@repeat
+            session.lastSeen = System.nanoTime()
+            session.upBytes += n
+            try {
+                session.channel.write(ByteBuffer.wrap(bytes, 0, n))
+            } catch (_: IOException) {
+            }
+        }
+    }
+
+    private fun answerPing(client: SocketAddress, n: Int) {
+        val info = serverInfo ?: return
+        if (!online) return // sin datos del servidor real no anunciamos nada
+        val (timestamp, _) = RakNet.parsePing(bytes, n) ?: return
+        val pong = RakNet.buildPong(timestamp, guid, info.forLan(listenPort, guid, customName))
+        try {
+            lan!!.send(ByteBuffer.wrap(pong), client)
+        } catch (_: IOException) {
+        }
+    }
+
+    private fun openSession(sel: Selector, client: SocketAddress): Session? {
+        val target = remoteAddress ?: return null
+        val channel = try {
+            // Ojo: dentro de apply{}, "remoteAddress" sería la del propio canal; por eso usamos "target".
+            DatagramChannel.open().apply {
+                connect(target)
+                configureBlocking(false)
+            }
+        } catch (e: Exception) {
+            emit(ProxyEvent.ERROR, "No se pudo abrir conexión con el servidor: ${e.message}")
+            return null
+        }
+        val session = Session(client, channel)
+        sessions[client] = session
+        channel.register(sel, SelectionKey.OP_READ, session)
+        emit(ProxyEvent.JOIN, "Consola conectándose desde ${describe(client)}")
+        return session
+    }
+
+    private fun readSession(session: Session) {
+        repeat(MAX_READS_PER_WAKE) {
+            buffer.clear()
+            val n = try { session.channel.read(buffer) } catch (_: IOException) { return }
+            if (n <= 0) return
+            buffer.flip()
+            session.lastSeen = System.nanoTime()
+            session.downBytes += n
+            try {
+                lan!!.send(buffer, session.client)
+            } catch (_: IOException) {
+            }
+        }
+    }
+
+    private fun cleanup(now: Long) {
+        val timeout = sessionTimeoutMs * 1_000_000
+        for (s in sessions.values) {
+            if (now - s.lastSeen <= timeout) continue
+            sessions.remove(s.client)
+            closeQuietly(s.channel) // también cancela su registro en el selector
+            val mb = (s.upBytes + s.downBytes) / 1_048_576.0
+            emit(ProxyEvent.LEAVE, "Consola ${describe(s.client)} desconectada (%.1f MB transferidos)".format(mb))
+        }
+    }
+
+    private fun describe(addr: SocketAddress) =
+        (addr as? InetSocketAddress)?.let { "${it.address.hostAddress}:${it.port}" } ?: addr.toString()
+
+    private fun closeQuietly(c: DatagramChannel?) {
+        try { c?.close() } catch (_: IOException) {}
+    }
+
+    private companion object {
+        const val MAX_DATAGRAM = 65535
+        const val MAX_READS_PER_WAKE = 512
+        const val TAG_LAN = "lan"
+        const val TAG_STATUS = "status"
+    }
+}
