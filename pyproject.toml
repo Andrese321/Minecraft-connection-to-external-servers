@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bedrock-lan-proxy"
+dynamic = ["version"]
+description = "Haz que un servidor externo de Minecraft Bedrock aparezca como partida LAN en tu consola."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+bedrock-lan-proxy = "bedrock_lan_proxy.__main__:main"
+
+[tool.setuptools]
+packages = ["bedrock_lan_proxy"]
+
+[tool.setuptools.dynamic]
+version = { attr = "bedrock_lan_proxy.__version__" }
