@@ -5,10 +5,14 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.content.res.Configuration
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -32,11 +36,13 @@ class MainActivity : Activity() {
     private lateinit var store: ServerStore
 
     private val refresher = Runnable { refreshLoop() }
+    private var lastActive: Boolean? = null
     private val hubListener: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        setupEdgeToEdge()
         store = ServerStore(this)
 
         host = findViewById(R.id.host)
@@ -172,40 +178,45 @@ class MainActivity : Activity() {
             ProxyHub.Status.OFFLINE -> "El servidor no responde" to R.color.status_red
             ProxyHub.Status.ERROR -> "Error" to R.color.status_red
         }
-        status.text = label
+        status.setIfChanged(label)
         dot.backgroundTintList = ColorStateList.valueOf(getColor(color))
 
         val active = isActive()
-        btnStart.setText(if (active) R.string.stop else R.string.start)
-        btnStart.backgroundTintList =
-            ColorStateList.valueOf(getColor(if (active) R.color.status_red else R.color.status_green))
-        host.isEnabled = !active
-        port.isEnabled = !active
-        name.isEnabled = !active
+        if (active != lastActive) {
+            lastActive = active
+            btnStart.setText(if (active) R.string.stop else R.string.start)
+            btnStart.backgroundTintList =
+                ColorStateList.valueOf(getColor(if (active) R.color.status_red else R.color.status_green))
+            host.isEnabled = !active
+            port.isEnabled = !active
+            name.isEnabled = !active
+        }
 
         val serverInfo = proxy?.serverInfo
         when {
             st == ProxyHub.Status.ONLINE && serverInfo != null -> {
                 val ping = proxy.latencyMs?.let { " · $it ms" } ?: ""
-                info.text = "${serverInfo.name} — ${serverInfo.version} — " +
-                    "${serverInfo.players}/${serverInfo.maxPlayers} jugadores$ping\n" +
-                    "${proxy.clientCount} consola(s) conectada(s)"
+                info.setIfChanged(
+                    "${serverInfo.name} — ${serverInfo.version} — " +
+                        "${serverInfo.players}/${serverInfo.maxPlayers} jugadores$ping\n" +
+                        "${proxy.clientCount} consola(s) conectada(s)",
+                )
             }
-            st == ProxyHub.Status.ERROR -> info.text = ProxyHub.lastError ?: ""
-            st == ProxyHub.Status.STARTING -> info.text = "Haciendo ping a ${host.text}…"
+            st == ProxyHub.Status.ERROR -> info.setIfChanged(ProxyHub.lastError ?: "")
+            st == ProxyHub.Status.STARTING -> info.setIfChanged("Haciendo ping a ${host.text}…")
             st == ProxyHub.Status.STOPPED && info.text.isNullOrEmpty() ->
-                info.text = "Escribe la IP del servidor y pulsa «Iniciar partida LAN»."
+                info.setIfChanged("Escribe la IP del servidor y pulsa «Iniciar partida LAN».")
         }
 
         val localIps = NetUtils.localIps()
-        ips.text = if (localIps.isEmpty()) {
+        ips.setIfChanged(if (localIps.isEmpty()) {
             "⚠ No estás conectado a ninguna red Wi-Fi. Conecta el teléfono a la misma red que la consola."
         } else {
             "IP de este teléfono: ${localIps.joinToString(", ")}"
-        }
+        })
 
         val lines = ProxyHub.log
-        log.text = if (lines.isEmpty()) "—" else lines.takeLast(60).joinToString("\n")
+        log.setIfChanged(if (lines.isEmpty()) "—" else lines.takeLast(60).joinToString("\n"))
     }
 
     private fun renderSaved() {
@@ -256,6 +267,61 @@ class MainActivity : Activity() {
     }
 
     // ------------------------------------------------------------ utilidades
+
+    /**
+     * Desde Android 15 la app se dibuja detrás de la barra de estado y la de navegación.
+     * Lo activamos en todas las versiones y dejamos el hueco exacto: la cabecera se
+     * estira bajo la barra de estado y el contenido evita barras, recortes y teclado.
+     */
+    @Suppress("DEPRECATION")
+    private fun setupEdgeToEdge() {
+        val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = getColor(R.color.background)
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.setSystemBarsAppearance(
+                if (night) 0 else WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS or
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+            )
+        } else {
+            var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            if (!night) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            window.decorView.systemUiVisibility = flags
+        }
+
+        val header = findViewById<View>(R.id.header)
+        val scroll = findViewById<View>(R.id.scroll)
+        val headerPad = dp(14)
+        val sidePad = dp(16)
+        findViewById<View>(R.id.root).setOnApplyWindowInsetsListener { _, insets ->
+            val left: Int
+            val top: Int
+            val right: Int
+            val bottom: Int
+            if (Build.VERSION.SDK_INT >= 30) {
+                val i = insets.getInsets(
+                    WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.ime(),
+                )
+                left = i.left; top = i.top; right = i.right; bottom = i.bottom
+            } else {
+                left = insets.systemWindowInsetLeft; top = insets.systemWindowInsetTop
+                right = insets.systemWindowInsetRight; bottom = insets.systemWindowInsetBottom
+            }
+            header.setPadding(sidePad + left, headerPad + top, sidePad + right, headerPad)
+            scroll.setPadding(left, 0, right, bottom)
+            insets
+        }
+    }
+
+    /** Cambiar el texto provoca un nuevo cálculo del diseño: solo lo hacemos si cambió. */
+    private fun TextView.setIfChanged(value: CharSequence) {
+        if (text.toString() != value.toString()) text = value
+    }
 
     private fun askNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&

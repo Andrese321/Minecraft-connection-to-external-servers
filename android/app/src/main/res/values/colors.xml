@@ -12,5 +12,6 @@
     <color name="status_orange">#D98A00</color>
     <color name="status_red">#C62828</color>
     <color name="status_grey">#8A8A8A</color>
+    <color name="header">#2E7D32</color>
     <color name="ic_launcher_background">#2E7D32</color>
 </resources>

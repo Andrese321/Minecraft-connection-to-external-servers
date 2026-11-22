@@ -8,4 +8,5 @@
     <color name="text">#E8EAE8</color>
     <color name="text_secondary">#A4A9A4</color>
     <color name="log_bg">#181B18</color>
+    <color name="header">#1B3A1D</color>
 </resources>
