@@ -1,8 +1,7 @@
 name: Diagnóstico
 
+# Se ejecuta a mano desde la pestaña Actions (tarda unos minutos por el emulador).
 on:
-  push:
-    branches: [ccr-a38cdac2-i9pjwq]
   workflow_dispatch:
     inputs:
       servidor:
