@@ -34,6 +34,8 @@ class MainActivity : Activity() {
     private lateinit var savedList: LinearLayout
     private lateinit var log: TextView
     private lateinit var store: ServerStore
+    private lateinit var modeTransfer: android.widget.RadioButton
+    private lateinit var modeRelay: android.widget.RadioButton
 
     private val refresher = Runnable { refreshLoop() }
     private var lastActive: Boolean? = null
@@ -58,6 +60,9 @@ class MainActivity : Activity() {
         ips = findViewById(R.id.ips)
         savedList = findViewById(R.id.savedList)
         log = findViewById(R.id.log)
+        modeTransfer = findViewById(R.id.modeTransfer)
+        modeRelay = findViewById(R.id.modeRelay)
+        if (store.transferMode) modeTransfer.isChecked = true else modeRelay.isChecked = true
 
         if (savedInstanceState == null) {
             host.setText(store.lastHost)
@@ -117,8 +122,10 @@ class MainActivity : Activity() {
         store.lastHost = h
         store.lastPort = p
         store.lastName = n.orEmpty()
-        ProxyHub.append("Iniciando partida LAN para $h:$p…")
-        ProxyService.start(this, h, p, n)
+        val transfer = modeTransfer.isChecked
+        store.transferMode = transfer
+        ProxyHub.append("Iniciando partida LAN para $h:$p (modo ${if (transfer) "transferir" else "puente"})…")
+        ProxyService.start(this, h, p, n, transfer)
     }
 
     private fun testServer() {
@@ -193,6 +200,8 @@ class MainActivity : Activity() {
             host.isEnabled = !active
             port.isEnabled = !active
             name.isEnabled = !active
+            modeTransfer.isEnabled = !active
+            modeRelay.isEnabled = !active
         }
 
         val serverInfo = proxy?.serverInfo
@@ -202,13 +211,13 @@ class MainActivity : Activity() {
                 info.setIfChanged(
                     "${serverInfo.name} — ${serverInfo.version} — " +
                         "${serverInfo.players}/${serverInfo.maxPlayers} jugadores$ping\n" +
-                        "${proxy.clientCount} consola(s) conectada(s)",
+                        consolesText(proxy),
                 )
             }
             st == ProxyHub.Status.BLIND -> info.setIfChanged(
                 "Busca la partida en la consola e intenta entrar. Si no conecta, comprueba la IP y el " +
                     "puerto con «Probar servidor»: puede estar apagado o ser de Java Edition " +
-                    "(${proxy?.clientCount ?: 0} consola(s) conectada(s)).",
+                    "(" + consolesText(proxy) + ").",
             )
             st == ProxyHub.Status.ERROR -> info.setIfChanged(ProxyHub.lastError ?: "")
             st == ProxyHub.Status.STARTING -> info.setIfChanged("Haciendo ping a ${host.text}…")
@@ -323,6 +332,16 @@ class MainActivity : Activity() {
             header.setPadding(sidePad + left, headerPad + top, sidePad + right, headerPad)
             scroll.setPadding(left, 0, right, bottom)
             insets
+        }
+    }
+
+    private fun consolesText(proxy: com.bedrocklanproxy.core.LanProxy?): String {
+        val sent = ProxyHub.transferred
+        val relayed = proxy?.clientCount ?: 0
+        return when {
+            sent > 0 && relayed > 0 -> "$sent consola(s) enviada(s) al servidor, $relayed por el puente"
+            sent > 0 -> "$sent consola(s) enviada(s) al servidor: ya puedes cerrar la app"
+            else -> "$relayed consola(s) conectada(s) por el puente"
         }
     }
 

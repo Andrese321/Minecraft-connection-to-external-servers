@@ -10,7 +10,15 @@ import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
 import java.util.concurrent.ConcurrentHashMap
 
-enum class ProxyEvent { INFO, ONLINE, OFFLINE, UNREACHABLE, JOIN, LEAVE, ERROR, STOPPED }
+enum class ProxyEvent { INFO, ONLINE, OFFLINE, UNREACHABLE, JOIN, LEAVE, TRANSFERRED, ERROR, STOPPED }
+
+/**
+ * RELAY: el teléfono reenvía todo el tráfico (debe seguir encendido mientras se juega).
+ * TRANSFER: el teléfono solo recibe a la consola y la manda al servidor real con un paquete
+ * Transfer; después se puede cerrar la app. Si una consola ignora la transferencia, en su
+ * siguiente intento se usa RELAY automáticamente.
+ */
+enum class ProxyMode { RELAY, TRANSFER }
 
 fun interface ProxyListener {
     fun onEvent(event: ProxyEvent, message: String)
@@ -37,6 +45,7 @@ class LanProxy(
     private val sessionTimeoutMs: Long = 30_000,
     /** Si el servidor no responde al ping en este tiempo, se anuncia la partida igualmente. */
     private val fallbackAfterMs: Long = 4000,
+    val mode: ProxyMode = ProxyMode.RELAY,
 ) {
     val customName: String? = customName?.takeIf { it.isNotBlank() }
     val guid: Long = RakNet.randomGuid()
@@ -65,6 +74,9 @@ class LanProxy(
     }
 
     private val sessions = ConcurrentHashMap<SocketAddress, Session>()
+    private val transfers = HashMap<SocketAddress, TransferSession>()
+    /** Consolas que ignoraron la transferencia: hasta cuándo usan el modo puente. */
+    private val relayFallback = HashMap<java.net.InetAddress, Long>()
     private var lan: DatagramChannel? = null
     private var status: DatagramChannel? = null
     private var selector: Selector? = null
@@ -169,6 +181,7 @@ class LanProxy(
                             "sea un servidor de Java Edition.",
                     )
                 }
+                if (transfers.isNotEmpty()) tickTransfers(now)
                 if (now >= nextCleanup) {
                     cleanup(now)
                     nextCleanup = now + 1_000_000_000L
@@ -255,6 +268,10 @@ class LanProxy(
                 answerPing(client, n)
                 return@repeat
             }
+            if (mode == ProxyMode.TRANSFER && !sessions.containsKey(client) && !usesRelay(client)) {
+                handleTransfer(client, n)
+                return@repeat
+            }
             val session = sessions[client] ?: openSession(sel, client) ?: return@repeat
             session.lastSeen = System.nanoTime()
             session.upBytes += n
@@ -262,6 +279,70 @@ class LanProxy(
                 session.channel.write(ByteBuffer.wrap(bytes, 0, n))
             } catch (_: IOException) {
             }
+        }
+    }
+
+    private fun usesRelay(client: SocketAddress): Boolean {
+        val ip = (client as? InetSocketAddress)?.address ?: return false
+        val until = relayFallback[ip] ?: return false
+        if (System.nanoTime() < until) return true
+        relayFallback.remove(ip)
+        return false
+    }
+
+    private fun handleTransfer(client: SocketAddress, n: Int) {
+        val addr = client as? InetSocketAddress ?: return
+        var t = transfers[client]
+        if (t == null) {
+            // Una conexión nueva siempre empieza con Open Connection Request 1.
+            if (bytes[0].toInt() != TransferSession.ID_OPEN_CONNECTION_REQUEST_1) return
+            t = TransferSession(
+                client = addr,
+                serverGuid = guid,
+                targetHost = remoteHost,
+                targetPort = remotePort,
+                send = { data ->
+                    try { lan!!.send(ByteBuffer.wrap(data), client) } catch (_: IOException) {}
+                },
+                log = ::emit,
+            )
+            transfers[client] = t
+            emit(ProxyEvent.JOIN, "Consola conectándose desde ${describe(client)} (modo transferencia)")
+        }
+        t.handle(bytes, n)
+        if (t.outcome != TransferSession.Outcome.PENDING) finishTransfer(t)
+    }
+
+    private fun tickTransfers(now: Long) {
+        for (t in transfers.values.toList()) {
+            t.tick(now)
+            when {
+                t.outcome != TransferSession.Outcome.PENDING -> finishTransfer(t)
+                now - t.lastSeen > TRANSFER_IDLE_NS -> {
+                    transfers.remove(t.client)
+                    emit(ProxyEvent.LEAVE, "La consola ${describe(t.client)} dejó de responder")
+                }
+            }
+        }
+    }
+
+    private fun finishTransfer(t: TransferSession) {
+        transfers.remove(t.client)
+        when (t.outcome) {
+            TransferSession.Outcome.TRANSFERRED -> emit(
+                ProxyEvent.TRANSFERRED,
+                "La consola ${t.client.address.hostAddress} se ha ido al servidor. Ya puedes cerrar la app " +
+                    "(hace falta otra vez solo para volver a entrar).",
+            )
+            TransferSession.Outcome.IGNORED -> {
+                relayFallback[t.client.address] = System.nanoTime() + RELAY_FALLBACK_NS
+                emit(
+                    ProxyEvent.ERROR,
+                    "La consola ${t.client.address.hostAddress} no aceptó la transferencia. Vuelve a entrar en " +
+                        "la partida LAN: esta vez el teléfono hará de puente (deja la app abierta).",
+                )
+            }
+            else -> emit(ProxyEvent.LEAVE, "La consola ${describe(t.client)} se desconectó")
         }
     }
 
@@ -340,6 +421,8 @@ class LanProxy(
         const val MAX_READS_PER_WAKE = 512
         const val TAG_LAN = "lan"
         const val TAG_STATUS = "status"
+        const val TRANSFER_IDLE_NS = 20_000_000_000L
+        const val RELAY_FALLBACK_NS = 10 * 60 * 1_000_000_000L
         // Versión reciente de Bedrock para anunciar la partida si el servidor no responde al ping.
         const val FALLBACK_PROTOCOL = "2225"
         const val FALLBACK_VERSION = "1.26.60"

@@ -52,6 +52,9 @@ class ServerStore(context: Context) {
     var lastPort: Int
         get() = prefs.getInt("last_port", RakNet.DEFAULT_PORT)
         set(v) = prefs.edit().putInt("last_port", v).apply()
+    var transferMode: Boolean
+        get() = prefs.getBoolean("transfer_mode", true)
+        set(v) = prefs.edit().putBoolean("transfer_mode", v).apply()
     var lastName: String
         get() = prefs.getString("last_name", "") ?: ""
         set(v) = prefs.edit().putString("last_name", v).apply()

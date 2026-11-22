@@ -13,6 +13,19 @@ en ella, la app te lleva al servidor real.
 
 ## Cómo funciona
 
+La app de Android tiene dos modos:
+
+- **Transferir (recomendado):** el teléfono hace de mini servidor. Cuando la
+  consola entra en la partida LAN, le envía el paquete oficial *Transfer* de
+  Minecraft con la IP y el puerto del servidor real. La consola se conecta
+  directamente y **ya puedes cerrar la app**: solo hace falta para entrar. Si
+  una consola ignora la transferencia, la app la desconecta con un aviso y en
+  el siguiente intento usa el modo puente automáticamente.
+- **Puente:** el teléfono reenvía todo el tráfico, así que debe seguir
+  encendido mientras juegas. La versión de PC funciona siempre así.
+
+Esquema del modo puente:
+
 ```
  Consola  ──(red local / Wi-Fi)──▶  Esta app (móvil o PC)  ──(internet)──▶  Servidor externo
    ▲  "¿hay partidas LAN?"                    │  responde: "sí, <nombre del servidor>"
@@ -57,8 +70,14 @@ Hay dos versiones que hacen lo mismo:
    **▶ Iniciar partida LAN**. Acepta el permiso de notificaciones.
 3. Cuando el punto se ponga verde, abre Minecraft en la consola → **Jugar** →
    **Amigos**. El servidor aparece en *Partidas LAN*.
-4. Puedes apagar la pantalla del teléfono. La app sigue funcionando y deja una
-   notificación con un botón **Detener**.
+4. En modo **Transferir**, cuando la consola ya está en el servidor la app lo
+   indica («ya puedes cerrar la app»). En modo **Puente** puedes apagar la
+   pantalla: la app sigue funcionando y deja una notificación con un botón
+   **Detener**.
+
+Si el servidor no responde al ping (está apagado, la IP o el puerto están mal,
+o es un servidor de Java Edition), la partida se anuncia igualmente a los
+4 segundos para que puedas intentar entrar, y la app lo avisa.
 
 La app también tiene servidores guardados (toca para rellenar, mantén pulsado
 para borrar), **Probar servidor** y un registro de lo que pasa.

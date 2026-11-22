@@ -23,6 +23,9 @@ object ProxyHub {
         private set
     @Volatile var lastError: String? = null
         private set
+    /** Consolas enviadas al servidor con éxito desde que se inició la partida LAN. */
+    @Volatile var transferred: Int = 0
+        private set
 
     val log: List<String> get() = synchronized(logLines) { logLines.toList() }
 
@@ -30,6 +33,7 @@ object ProxyHub {
     fun removeListener(l: () -> Unit) { listeners -= l }
 
     fun setStatus(s: Status, error: String? = null) {
+        if (s == Status.STARTING) transferred = 0
         status = s
         if (error != null) lastError = error
         notifyChanged()
@@ -51,6 +55,7 @@ object ProxyHub {
             ProxyEvent.ONLINE -> setStatus(Status.ONLINE)
             ProxyEvent.OFFLINE -> setStatus(Status.OFFLINE)
             ProxyEvent.UNREACHABLE -> setStatus(Status.BLIND)
+            ProxyEvent.TRANSFERRED -> { transferred++; notifyChanged() }
             // Un proxy que se detiene sin que nadie lo pidiera (seguía registrado) es un fallo.
             ProxyEvent.STOPPED -> {
                 proxy = null

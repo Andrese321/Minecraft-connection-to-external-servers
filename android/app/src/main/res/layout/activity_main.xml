@@ -85,6 +85,28 @@
                 android:inputType="textCapSentences"
                 android:maxLines="1" />
 
+            <RadioGroup
+                android:id="@+id/modeGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:checkedButton="@+id/modeTransfer">
+
+                <RadioButton
+                    android:id="@+id/modeTransfer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/mode_transfer"
+                    android:textColor="@color/text" />
+
+                <RadioButton
+                    android:id="@+id/modeRelay"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/mode_relay"
+                    android:textColor="@color/text" />
+            </RadioGroup>
+
             <Button
                 android:id="@+id/btnStart"
                 android:layout_width="match_parent"

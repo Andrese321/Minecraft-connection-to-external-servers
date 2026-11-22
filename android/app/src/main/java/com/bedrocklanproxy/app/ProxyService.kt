@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import com.bedrocklanproxy.core.LanProxy
+import com.bedrocklanproxy.core.ProxyMode
 import com.bedrocklanproxy.core.ProxyException
 import com.bedrocklanproxy.core.RakNet
 import kotlin.concurrent.thread
@@ -38,8 +39,9 @@ class ProxyService : Service() {
                 val host = intent.getStringExtra(EXTRA_HOST).orEmpty()
                 val port = intent.getIntExtra(EXTRA_PORT, RakNet.DEFAULT_PORT)
                 val name = intent.getStringExtra(EXTRA_NAME)
+                val mode = if (intent.getBooleanExtra(EXTRA_TRANSFER, true)) ProxyMode.TRANSFER else ProxyMode.RELAY
                 goForeground("Conectando con $host…")
-                startProxy(host, port, name)
+                startProxy(host, port, name, mode)
             }
             ACTION_STOP -> shutdown()
             else -> {
@@ -50,7 +52,7 @@ class ProxyService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startProxy(host: String, port: Int, name: String?) {
+    private fun startProxy(host: String, port: Int, name: String?, mode: ProxyMode) {
         stopProxy()
         val myGeneration = ++generation
         ProxyHub.setStatus(ProxyHub.Status.STARTING)
@@ -59,7 +61,10 @@ class ProxyService : Service() {
         // start() resuelve DNS: Android no permite red en el hilo principal.
         thread(name = "ProxyStart") {
             lateinit var proxy: LanProxy
-            proxy = LanProxy(host, port, customName = name, listener = { e, m -> ProxyHub.onProxyEvent(proxy, e, m) })
+            proxy = LanProxy(
+                host, port, customName = name, mode = mode,
+                listener = { e, m -> ProxyHub.onProxyEvent(proxy, e, m) },
+            )
             synchronized(this) {
                 if (myGeneration != generation) return@thread
                 ProxyHub.proxy = proxy // antes de start() para no perder sus primeros eventos
@@ -197,15 +202,17 @@ class ProxyService : Service() {
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_NAME = "name"
+        const val EXTRA_TRANSFER = "transfer"
         private const val CHANNEL_ID = "proxy"
         private const val NOTIFICATION_ID = 1
 
-        fun start(context: Context, host: String, port: Int, name: String?) {
+        fun start(context: Context, host: String, port: Int, name: String?, transfer: Boolean) {
             val intent = Intent(context, ProxyService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_HOST, host)
                 .putExtra(EXTRA_PORT, port)
                 .putExtra(EXTRA_NAME, name)
+                .putExtra(EXTRA_TRANSFER, transfer)
             context.startForegroundService(intent)
         }
 
