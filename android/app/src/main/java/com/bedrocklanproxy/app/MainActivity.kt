@@ -43,6 +43,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         setupEdgeToEdge()
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { null }
+        findViewById<TextView>(R.id.header).text = getString(R.string.app_name) + (version?.let { "  ·  v$it" } ?: "")
         store = ServerStore(this)
 
         host = findViewById(R.id.host)

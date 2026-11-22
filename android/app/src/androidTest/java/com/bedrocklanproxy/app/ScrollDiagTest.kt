@@ -56,31 +56,56 @@ class ScrollDiagTest {
         pause(3000)
         dump("4-tras-iniciar", shot = true)
 
-        device.pressBack() // cierra el teclado si sigue abierto
+        if (imeVisible()) device.pressBack() // cierra el teclado solo si sigue abierto
         pause(2000)
-        dump("5-teclado-cerrado", shot = true)
+        dump("5-teclado-cerrado")
 
-        // Deslizar hacia abajo = subir el contenido.
+        // Bajar hasta el final (para ver el registro) y volver a subir.
+        swipeUp()
+        swipeUp()
+        pause(1500)
+        dump("6-abajo-del-todo", shot = true)
+        swipeDown()
         swipeDown()
         pause(500)
-        dump("6-justo-tras-deslizar")
+        dump("7-justo-tras-subir")
         pause(3000)
-        dump("7-3s-despues", shot = true)
+        dump("8-3s-despues-de-subir", shot = true)
 
         // Horizontal.
         device.setOrientationLeft()
         pause(3000)
-        dump("8-horizontal", shot = true)
+        dump("9-horizontal", shot = true)
+        swipeUp()
+        pause(1500)
+        dump("10-horizontal-abajo")
+        swipeDown()
         swipeDown()
         pause(500)
-        dump("9-horizontal-tras-deslizar")
+        dump("11-horizontal-tras-subir")
         pause(3000)
-        dump("10-horizontal-3s-despues", shot = true)
+        dump("12-horizontal-3s-despues", shot = true)
 
         scenario.onActivity { it.findViewById<View>(R.id.btnStart).performClick() } // detener
         pause(1000)
         device.setOrientationNatural()
         scenario.close()
+    }
+
+    private fun imeVisible(): Boolean {
+        var visible = false
+        scenario.onActivity { a ->
+            val insets = a.window.decorView.rootWindowInsets
+            visible = android.os.Build.VERSION.SDK_INT >= 30 && insets != null &&
+                insets.isVisible(WindowInsets.Type.ime())
+        }
+        return visible
+    }
+
+    private fun swipeUp() {
+        val w = device.displayWidth
+        val h = device.displayHeight
+        device.swipe(w / 2, (h * 0.8).toInt(), w / 2, (h * 0.3).toInt(), 15)
     }
 
     private fun swipeDown() {

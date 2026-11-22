@@ -3,6 +3,9 @@ plugins {
     kotlin("android")
 }
 
+// En GitHub Actions cada compilación lleva el número de ejecución, para saber qué versión tienes.
+val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+
 android {
     namespace = "com.bedrocklanproxy.app"
     compileSdk = 35
@@ -11,9 +14,20 @@ android {
         applicationId = "com.bedrocklanproxy.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = buildNumber
+        versionName = "1.1.$buildNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        // Clave de depuración fija (no es secreta): así cada APK nueva se instala encima de la
+        // anterior sin desinstalar. Para publicar en una tienda habría que usar una clave privada.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {

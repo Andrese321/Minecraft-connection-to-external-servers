@@ -53,6 +53,8 @@ jobs:
           script: |
             adb logcat -G 16M || true
             adb logcat -c || true
+            adb shell cmd uimode night yes || true
+            adb shell settings put system font_scale 1.3 || true
             ./gradlew --no-daemon :app:connectedDebugAndroidTest || true
             adb logcat -d -s DIAG:I SHOT:I AndroidRuntime:E > diag.txt || true
             cat diag.txt
