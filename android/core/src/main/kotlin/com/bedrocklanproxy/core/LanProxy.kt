@@ -10,7 +10,7 @@ import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
 import java.util.concurrent.ConcurrentHashMap
 
-enum class ProxyEvent { INFO, ONLINE, OFFLINE, JOIN, LEAVE, ERROR, STOPPED }
+enum class ProxyEvent { INFO, ONLINE, OFFLINE, UNREACHABLE, JOIN, LEAVE, ERROR, STOPPED }
 
 fun interface ProxyListener {
     fun onEvent(event: ProxyEvent, message: String)
@@ -35,6 +35,8 @@ class LanProxy(
     private val listener: ProxyListener? = null,
     private val pingIntervalMs: Long = 3000,
     private val sessionTimeoutMs: Long = 30_000,
+    /** Si el servidor no responde al ping en este tiempo, se anuncia la partida igualmente. */
+    private val fallbackAfterMs: Long = 4000,
 ) {
     val customName: String? = customName?.takeIf { it.isNotBlank() }
     val guid: Long = RakNet.randomGuid()
@@ -48,6 +50,9 @@ class LanProxy(
     @Volatile var online: Boolean = false
         private set
     @Volatile var remoteAddress: InetSocketAddress? = null
+        private set
+    /** true si se está anunciando la partida sin haber recibido respuesta del servidor. */
+    @Volatile var blind: Boolean = false
         private set
 
     val running: Boolean get() = thread?.isAlive == true
@@ -66,6 +71,7 @@ class LanProxy(
     @Volatile private var thread: Thread? = null
     @Volatile private var stopRequested = false
     private var lastPong = 0L
+    private var startedAt = 0L
     private var pingSentAt = 0L
     private val buffer: ByteBuffer = ByteBuffer.allocateDirect(MAX_DATAGRAM)
     private val bytes = ByteArray(MAX_DATAGRAM)
@@ -108,6 +114,8 @@ class LanProxy(
         online = false
         serverInfo = null
         lastPong = 0
+        blind = false
+        startedAt = System.nanoTime()
         thread = Thread(::run, "LanProxy").apply { isDaemon = true; start() }
         emit(
             ProxyEvent.INFO,
@@ -151,6 +159,15 @@ class LanProxy(
                 if (now >= nextPing) {
                     pingRemote(now)
                     nextPing = now + pingIntervalMs * 1_000_000
+                }
+                if (!blind && serverInfo == null && now - startedAt >= fallbackAfterMs * 1_000_000) {
+                    blind = true
+                    emit(
+                        ProxyEvent.UNREACHABLE,
+                        "El servidor no responde al ping. Se anuncia la partida LAN igualmente para que " +
+                            "puedas intentar entrar. Si no funciona, revisa la IP y el puerto, o puede que " +
+                            "sea un servidor de Java Edition.",
+                    )
                 }
                 if (now >= nextCleanup) {
                     cleanup(now)
@@ -203,7 +220,7 @@ class LanProxy(
         val offlineAfter = maxOf(pingIntervalMs * 3, 5000) * 1_000_000
         if (online && now - lastPong > offlineAfter) {
             online = false
-            emit(ProxyEvent.OFFLINE, "El servidor no responde. La partida LAN se ocultará hasta que vuelva.")
+            emit(ProxyEvent.OFFLINE, "El servidor ha dejado de responder al ping. La partida LAN sigue anunciada.")
         }
     }
 
@@ -218,6 +235,7 @@ class LanProxy(
             serverInfo = info
             if (!online) {
                 online = true
+                blind = false
                 emit(
                     ProxyEvent.ONLINE,
                     "Servidor en línea: ${info.name} | ${info.version} | ${info.players}/${info.maxPlayers} " +
@@ -248,8 +266,8 @@ class LanProxy(
     }
 
     private fun answerPing(client: SocketAddress, n: Int) {
-        val info = serverInfo ?: return
-        if (!online) return // sin datos del servidor real no anunciamos nada
+        // Con datos del servidor real (aunque ahora no responda) o, si nunca respondió, con unos genéricos.
+        val info = serverInfo ?: if (blind) fallbackInfo() else return
         val (timestamp, _) = RakNet.parsePing(bytes, n) ?: return
         val pong = RakNet.buildPong(timestamp, guid, info.forLan(listenPort, guid, customName))
         try {
@@ -257,6 +275,13 @@ class LanProxy(
         } catch (_: IOException) {
         }
     }
+
+    private fun fallbackInfo(): ServerInfo = ServerInfo(
+        listOf(
+            "MCPE", customName ?: remoteHost, FALLBACK_PROTOCOL, FALLBACK_VERSION, "0", "100", "0",
+            "$remoteHost:$remotePort", "Survival", "1", "19132", "19133",
+        ),
+    )
 
     private fun openSession(sel: Selector, client: SocketAddress): Session? {
         val target = remoteAddress ?: return null
@@ -315,5 +340,8 @@ class LanProxy(
         const val MAX_READS_PER_WAKE = 512
         const val TAG_LAN = "lan"
         const val TAG_STATUS = "status"
+        // Versión reciente de Bedrock para anunciar la partida si el servidor no responde al ping.
+        const val FALLBACK_PROTOCOL = "2225"
+        const val FALLBACK_VERSION = "1.26.60"
     }
 }

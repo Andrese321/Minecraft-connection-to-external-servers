@@ -175,7 +175,8 @@ class MainActivity : Activity() {
             ProxyHub.Status.STOPPED -> "Detenido" to R.color.status_grey
             ProxyHub.Status.STARTING -> "Contactando con el servidor…" to R.color.status_orange
             ProxyHub.Status.ONLINE -> "Partida LAN visible en la consola" to R.color.status_green
-            ProxyHub.Status.OFFLINE -> "El servidor no responde" to R.color.status_red
+            ProxyHub.Status.BLIND -> "Partida LAN anunciada (el servidor no responde al ping)" to R.color.status_orange
+            ProxyHub.Status.OFFLINE -> "El servidor dejó de responder (la partida sigue anunciada)" to R.color.status_orange
             ProxyHub.Status.ERROR -> "Error" to R.color.status_red
         }
         status.setIfChanged(label)
@@ -202,6 +203,11 @@ class MainActivity : Activity() {
                         "${proxy.clientCount} consola(s) conectada(s)",
                 )
             }
+            st == ProxyHub.Status.BLIND -> info.setIfChanged(
+                "Busca la partida en la consola e intenta entrar. Si no conecta, comprueba la IP y el " +
+                    "puerto con «Probar servidor»: puede estar apagado o ser de Java Edition " +
+                    "(${proxy?.clientCount ?: 0} consola(s) conectada(s)).",
+            )
             st == ProxyHub.Status.ERROR -> info.setIfChanged(ProxyHub.lastError ?: "")
             st == ProxyHub.Status.STARTING -> info.setIfChanged("Haciendo ping a ${host.text}…")
             st == ProxyHub.Status.STOPPED && info.text.isNullOrEmpty() ->

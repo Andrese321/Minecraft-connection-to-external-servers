@@ -26,6 +26,7 @@ class LanProxyTest {
         val p = LanProxy(
             "127.0.0.1", serverPort, listenHost = "127.0.0.1", listenPort = 0, customName = name,
             listener = { e, _ -> events.add(e) }, pingIntervalMs = 200, sessionTimeoutMs = sessionTimeoutMs,
+            fallbackAfterMs = 1000,
         )
         p.start()
         cleanups += { p.stop() }
@@ -86,13 +87,27 @@ class LanProxyTest {
         }
     }
 
-    @Test fun noPongWhenServerOffline() {
+    @Test fun blindAdvertisingWhenServerDoesNotAnswerPings() {
         val deadPort = DatagramSocket(0, InetAddress.getByName("127.0.0.1")).use { it.localPort }
-        val (p, _) = proxy(deadPort)
-        assertFalse(p.waitOnline(600))
+        val (p, events) = proxy(deadPort, name = "Mi Server")
         val c = console().apply { soTimeout = 500 }
+
+        // Antes del plazo de espera no se anuncia nada.
         c.sendTo(RakNet.buildPing(1), p.listenPort)
         assertFailsWith<SocketTimeoutException> { c.recv() }
+
+        // Después se anuncia con datos genéricos y el nombre elegido.
+        val deadline = System.currentTimeMillis() + 3000
+        while (!p.blind && System.currentTimeMillis() < deadline) Thread.sleep(50)
+        assertTrue(p.blind)
+        assertFalse(p.online)
+        assertContains(events, ProxyEvent.UNREACHABLE)
+        c.sendTo(RakNet.buildPing(1, timestamp = 7), p.listenPort)
+        val pong = assertNotNull(RakNet.parsePong(c.recv()))
+        val f = pong.motd.trimEnd(';').split(";")
+        assertEquals(7, pong.timestamp)
+        assertEquals("Mi Server", f[1])
+        assertEquals(p.listenPort.toString(), f[10])
     }
 
     @Test fun serverGoesOffline() {

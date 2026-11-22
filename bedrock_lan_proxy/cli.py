@@ -10,7 +10,7 @@ from . import APP_NAME, __version__, config, raknet
 from .proxy import EV_ERROR, EV_STOPPED, LanProxy, ProxyError
 
 _ICONS = {
-    "info": "[i]", "online": "[OK]", "offline": "[!]", "join": "[+]",
+    "info": "[i]", "online": "[OK]", "offline": "[!]", "unreachable": "[!]", "join": "[+]",
     "leave": "[-]", "error": "[ERROR]", "stopped": "[x]",
 }
 

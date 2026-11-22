@@ -157,7 +157,8 @@ class ProxyService : Service() {
         val text = when (ProxyHub.status) {
             ProxyHub.Status.ONLINE ->
                 "Partida LAN visible: ${proxy?.customName ?: info?.name ?: ""} · ${proxy?.clientCount ?: 0} consola(s)"
-            ProxyHub.Status.OFFLINE -> "El servidor no responde"
+            ProxyHub.Status.BLIND -> "Partida LAN anunciada (el servidor no responde al ping)"
+            ProxyHub.Status.OFFLINE -> "El servidor dejó de responder"
             ProxyHub.Status.STARTING -> "Conectando…"
             ProxyHub.Status.ERROR -> "Error: revisa la app"
             ProxyHub.Status.STOPPED -> return

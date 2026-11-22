@@ -11,7 +11,7 @@ import java.util.concurrent.CopyOnWriteArraySet
 
 /** Estado compartido entre el servicio (que ejecuta el proxy) y la pantalla. */
 object ProxyHub {
-    enum class Status { STOPPED, STARTING, ONLINE, OFFLINE, ERROR }
+    enum class Status { STOPPED, STARTING, ONLINE, BLIND, OFFLINE, ERROR }
 
     private val main = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<() -> Unit>()
@@ -50,6 +50,7 @@ object ProxyHub {
         when (event) {
             ProxyEvent.ONLINE -> setStatus(Status.ONLINE)
             ProxyEvent.OFFLINE -> setStatus(Status.OFFLINE)
+            ProxyEvent.UNREACHABLE -> setStatus(Status.BLIND)
             // Un proxy que se detiene sin que nadie lo pidiera (seguía registrado) es un fallo.
             ProxyEvent.STOPPED -> {
                 proxy = null

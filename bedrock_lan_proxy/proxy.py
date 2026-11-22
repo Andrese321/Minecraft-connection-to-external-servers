@@ -29,6 +29,7 @@ EventCallback = Callable[[str, str], None]
 EV_INFO = "info"
 EV_ONLINE = "online"
 EV_OFFLINE = "offline"
+EV_UNREACHABLE = "unreachable"
 EV_CLIENT_JOIN = "join"
 EV_CLIENT_LEAVE = "leave"
 EV_ERROR = "error"
@@ -36,6 +37,9 @@ EV_STOPPED = "stopped"
 
 _MAX_DATAGRAM = 65535
 _MAX_READS_PER_WAKE = 512
+# Versión reciente de Bedrock para anunciar la partida si el servidor no responde al ping.
+FALLBACK_PROTOCOL = "2225"
+FALLBACK_VERSION = "1.26.60"
 
 
 class ProxyError(Exception):
@@ -74,6 +78,7 @@ class LanProxy:
         on_event: Optional[EventCallback] = None,
         ping_interval: float = 3.0,
         session_timeout: float = 30.0,
+        fallback_after: float = 4.0,
     ) -> None:
         self.remote_host = remote_host
         self.remote_port = remote_port
@@ -83,6 +88,9 @@ class LanProxy:
         self.on_event = on_event
         self.ping_interval = ping_interval
         self.session_timeout = session_timeout
+        self.fallback_after = fallback_after
+        self.blind = False  # anunciando sin respuesta del servidor
+        self._started_at = 0.0
 
         self.guid = raknet.random_guid()
         self.server_info: Optional[raknet.ServerInfo] = None
@@ -147,6 +155,8 @@ class LanProxy:
         self._stop.clear()
         self._online = False
         self.server_info = None
+        self.blind = False
+        self._started_at = time.monotonic()
         self._thread = threading.Thread(target=self._run, name="LanProxy", daemon=True)
         self._thread.start()
         self._emit(
@@ -191,6 +201,15 @@ class LanProxy:
                 if now >= next_ping:
                     self._ping_remote(now)
                     next_ping = now + self.ping_interval
+                if (not self.blind and self.server_info is None
+                        and now - self._started_at >= self.fallback_after):
+                    self.blind = True
+                    self._emit(
+                        EV_UNREACHABLE,
+                        "El servidor no responde al ping. Se anuncia la partida LAN igualmente para que "
+                        "puedas intentar entrar. Si no funciona, revisa la IP y el puerto, o puede que sea "
+                        "un servidor de Java Edition.",
+                    )
                 if now >= next_cleanup:
                     self._cleanup(sel, now)
                     next_cleanup = now + 1.0
@@ -229,7 +248,7 @@ class LanProxy:
             self._emit(EV_ERROR, f"No se pudo hacer ping al servidor: {exc}")
         if self._online and now - self._last_pong > max(self.ping_interval * 3, 5.0):
             self._online = False
-            self._emit(EV_OFFLINE, "El servidor no responde. La partida LAN se ocultará hasta que vuelva.")
+            self._emit(EV_OFFLINE, "El servidor ha dejado de responder al ping. La partida LAN sigue anunciada.")
 
     def _read_status(self) -> None:
         assert self._status_sock is not None
@@ -251,6 +270,7 @@ class LanProxy:
             self.server_info = info
             if not self._online:
                 self._online = True
+                self.blind = False
                 self._emit(
                     EV_ONLINE,
                     f"Servidor en línea: {info.name} | {info.version} | "
@@ -289,9 +309,12 @@ class LanProxy:
                 pass
 
     def _answer_ping(self, data: bytes, client: Tuple[str, int]) -> None:
+        # Con datos del servidor real (aunque ahora no responda) o, si nunca respondió, con unos genéricos.
         info = self.server_info
-        if info is None or not self._online:
-            return  # sin datos del servidor real no anunciamos nada
+        if info is None:
+            if not self.blind:
+                return
+            info = self._fallback_info()
         parsed = raknet.parse_ping(data)
         if parsed is None:
             return
@@ -302,6 +325,12 @@ class LanProxy:
             self._lan_sock.sendto(pong, client)
         except OSError:
             pass
+
+    def _fallback_info(self) -> raknet.ServerInfo:
+        return raknet.ServerInfo(fields=[
+            "MCPE", self.custom_name or self.remote_host, FALLBACK_PROTOCOL, FALLBACK_VERSION,
+            "0", "100", "0", f"{self.remote_host}:{self.remote_port}", "Survival", "1", "19132", "19133",
+        ])
 
     def _open_session(self, sel: selectors.BaseSelector,
                       client: Tuple[str, int]) -> Optional[_Session]:

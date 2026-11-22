@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from . import APP_NAME, __version__, config, raknet
 from .proxy import (EV_CLIENT_JOIN, EV_CLIENT_LEAVE, EV_ERROR, EV_OFFLINE,
-                    EV_ONLINE, EV_STOPPED, LanProxy, ProxyError)
+                    EV_ONLINE, EV_STOPPED, EV_UNREACHABLE, LanProxy, ProxyError)
 
 GREEN, ORANGE, RED, GREY = "#2e9d43", "#d98a00", "#c62828", "#777777"
 
@@ -266,7 +266,9 @@ class App:
             if ev == EV_ONLINE:
                 self._set_status("Partida LAN visible en la consola", GREEN)
             elif ev == EV_OFFLINE:
-                self._set_status("Servidor sin respuesta", RED)
+                self._set_status("El servidor dejó de responder (la partida sigue anunciada)", ORANGE)
+            elif ev == EV_UNREACHABLE:
+                self._set_status("Partida LAN anunciada (el servidor no responde al ping)", ORANGE)
             elif ev in (EV_CLIENT_JOIN, EV_CLIENT_LEAVE):
                 pass
             elif ev == EV_ERROR:

@@ -19,7 +19,8 @@ class ProxyTests(unittest.TestCase):
     def make_proxy(self, server_port, **kw):
         events = []
         proxy = LanProxy("127.0.0.1", server_port, listen_host="127.0.0.1", listen_port=0,
-                         ping_interval=0.2, on_event=lambda k, m: events.append(k), **kw)
+                         ping_interval=0.2, fallback_after=1.0,
+                         on_event=lambda k, m: events.append(k), **kw)
         proxy.start()
         self.addCleanup(proxy.stop)
         return proxy, events
@@ -65,19 +66,33 @@ class ProxyTests(unittest.TestCase):
             self.assertIn("online", events)
             self.assertIn("join", events)
 
-    def test_no_pong_when_server_offline(self):
+    def test_blind_advertising_when_server_does_not_answer(self):
         dead = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         dead.bind(("127.0.0.1", 0))
         port = dead.getsockname()[1]
         dead.close()
-        proxy, _ = self.make_proxy(port)
-        self.assertFalse(proxy.wait_online(0.6))
+        proxy, events = self.make_proxy(port, custom_name="Mi Server")
         console = client_socket()
         self.addCleanup(console.close)
         console.settimeout(0.5)
+        # Antes del plazo no se anuncia nada.
         console.sendto(raknet.build_ping(1), ("127.0.0.1", proxy.listen_port))
         with self.assertRaises(socket.timeout):
             console.recvfrom(65535)
+        # Después, sí: con datos genéricos y el nombre elegido.
+        import time
+        deadline = time.monotonic() + 3
+        while not proxy.blind and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(proxy.blind)
+        self.assertFalse(proxy.online)
+        self.assertIn("unreachable", events)
+        console.sendto(raknet.build_ping(1, timestamp=7), ("127.0.0.1", proxy.listen_port))
+        ts, _, motd = raknet.parse_pong(console.recvfrom(65535)[0])
+        fields = motd.rstrip(";").split(";")
+        self.assertEqual(ts, 7)
+        self.assertEqual(fields[1], "Mi Server")
+        self.assertEqual(fields[10], str(proxy.listen_port))
 
     def test_server_goes_offline(self):
         with FakeServer() as srv:
