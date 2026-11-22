@@ -77,6 +77,7 @@ class LanProxy(
     private val transfers = HashMap<SocketAddress, TransferSession>()
     /** Consolas que ignoraron la transferencia: hasta cuándo usan el modo puente. */
     private val relayFallback = HashMap<java.net.InetAddress, Long>()
+    private val searchLogged = HashMap<java.net.InetAddress, Long>()
     private var lan: DatagramChannel? = null
     private var status: DatagramChannel? = null
     private var selector: Selector? = null
@@ -348,13 +349,33 @@ class LanProxy(
 
     private fun answerPing(client: SocketAddress, n: Int) {
         // Con datos del servidor real (aunque ahora no responda) o, si nunca respondió, con unos genéricos.
-        val info = serverInfo ?: if (blind) fallbackInfo() else return
+        val info = serverInfo ?: if (blind) fallbackInfo() else null
+        logSearch(client, info)
+        if (info == null) return
         val (timestamp, _) = RakNet.parsePing(bytes, n) ?: return
         val pong = RakNet.buildPong(timestamp, guid, info.forLan(listenPort, guid, customName))
         try {
             lan!!.send(ByteBuffer.wrap(pong), client)
         } catch (_: IOException) {
         }
+    }
+
+    /** Anota (como mucho cada 30 s por dispositivo) que alguien está buscando partidas LAN. */
+    private fun logSearch(client: SocketAddress, info: ServerInfo?) {
+        val ip = (client as? InetSocketAddress)?.address ?: return
+        val now = System.nanoTime()
+        if (now - (searchLogged[ip] ?: Long.MIN_VALUE / 2) < 30_000_000_000L) return
+        searchLogged[ip] = now
+        val who = ip.hostAddress
+        emit(
+            ProxyEvent.INFO,
+            if (info == null) {
+                "La consola $who está buscando partidas LAN (aún no se anuncia: esperando al servidor)."
+            } else {
+                "La consola $who está buscando partidas LAN: respondiendo como «${customName ?: info.name}» " +
+                    "(versión ${info.version}, protocolo ${info.protocol})."
+            },
+        )
     }
 
     private fun fallbackInfo(): ServerInfo = ServerInfo(
