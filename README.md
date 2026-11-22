@@ -14,9 +14,9 @@ en ella, la app te lleva al servidor real.
 ## Cómo funciona
 
 ```
- Consola  ──(red local / Wi-Fi)──▶  Esta app (PC)  ──(internet)──▶  Servidor externo
-   ▲  "¿hay partidas LAN?"            │  responde: "sí, <nombre del servidor>"
-   └──────────────────────────────────┘  y luego reenvía todo el tráfico
+ Consola  ──(red local / Wi-Fi)──▶  Esta app (móvil o PC)  ──(internet)──▶  Servidor externo
+   ▲  "¿hay partidas LAN?"                    │  responde: "sí, <nombre del servidor>"
+   └──────────────────────────────────────────┘  y luego reenvía todo el tráfico
 ```
 
 1. Cuando abres la pestaña **Amigos** en Minecraft, la consola busca partidas
@@ -29,9 +29,47 @@ en ella, la app te lleva al servidor real.
 
 No hace falta instalar nada en la consola ni tocar el router.
 
-## Uso rápido
+Hay dos versiones que hacen lo mismo:
 
-**Requisito:** el PC con la app y la consola tienen que estar en **la misma red**
+- **📱 Android** (recomendada): el teléfono hace de puente. Ver [App Android](#-app-android).
+- **💻 PC** (Windows, macOS, Linux): ver [Uso rápido en PC](#uso-rápido-en-pc).
+
+## 📱 App Android
+
+### Instalar
+
+1. En GitHub, abre la pestaña **Actions** → el último run de *Pruebas y
+   ejecutables* → sección **Artifacts** → descarga **BedrockLanProxy-Android**.
+2. Es un `.zip`: ábrelo con la app *Archivos* del teléfono y saca
+   `BedrockLanProxy.apk`.
+3. Toca la APK para instalarla. Android pedirá permitir **instalar apps de
+   origen desconocido** para tu navegador o gestor de archivos.
+4. Requiere Android 8.0 o superior.
+
+> La APK es de depuración y se firma con una clave distinta en cada
+> compilación. Para instalar una versión nueva, desinstala antes la anterior.
+
+### Usar
+
+1. Conecta el teléfono y la consola a la **misma red Wi-Fi**. También vale
+   conectar la consola al **punto de acceso** del teléfono.
+2. Abre la app, escribe la IP o el dominio del servidor y pulsa
+   **▶ Iniciar partida LAN**. Acepta el permiso de notificaciones.
+3. Cuando el punto se ponga verde, abre Minecraft en la consola → **Jugar** →
+   **Amigos**. El servidor aparece en *Partidas LAN*.
+4. Puedes apagar la pantalla del teléfono. La app sigue funcionando y deja una
+   notificación con un botón **Detener**.
+
+La app también tiene servidores guardados (toca para rellenar, mantén pulsado
+para borrar), **Probar servidor** y un registro de lo que pasa.
+
+**Si la partida deja de verse con la pantalla apagada:** algunos fabricantes
+(Xiaomi, Samsung, Huawei…) cierran apps en segundo plano. Ve a *Ajustes →
+Aplicaciones → Bedrock LAN Proxy → Batería* y elige **Sin restricciones**.
+
+## Uso rápido en PC
+
+**Requisito:** el PC con el programa y la consola tienen que estar en **la misma red**
 (el mismo router o Wi-Fi).
 
 ### Opción A: ejecutable (sin instalar Python)
@@ -86,9 +124,9 @@ jugadores.
 
 | Problema | Solución |
 |---|---|
-| No aparece la partida LAN | Comprueba que la consola y el PC están en la misma red. Las redes de invitados y algunos routers con «aislamiento de clientes» o «AP isolation» bloquean el descubrimiento LAN. |
+| No aparece la partida LAN | Comprueba que la consola y el teléfono o PC están en la misma red. Las redes de invitados y algunos routers con «aislamiento de clientes» o «AP isolation» bloquean el descubrimiento LAN. |
 | Windows pregunta por el firewall | Pulsa **Permitir** en *redes privadas*. Si lo rechazaste, ve a *Firewall de Windows → Permitir una aplicación* y activa la app (o `python.exe`). |
-| «No se pudo abrir el puerto UDP 19132» | Minecraft u otro programa está usando ese puerto en el PC. Cierra Minecraft en el PC mientras usas la app. |
+| «No se pudo abrir el puerto UDP 19132» | Minecraft u otro programa está usando ese puerto en el mismo dispositivo. Cierra Minecraft en el teléfono o PC mientras usas la app. |
 | El punto se queda en naranja o rojo | El servidor no responde: revisa la IP y el puerto con **Probar servidor**. |
 | «Versión desactualizada» al entrar | El servidor usa otra versión de Minecraft que tu consola. Actualiza el juego o busca un servidor compatible. |
 | Expulsión justo al entrar en un servidor con puerto distinto de 19132 | Algunos servidores (poco comunes) comprueban que el puerto de conexión coincida con el suyo. Prueba la dirección alternativa del servidor en el puerto 19132, si la tiene. |
@@ -104,12 +142,20 @@ bedrock_lan_proxy/
   config.py    # servidores guardados
 tests/         # pruebas con un servidor Bedrock simulado
 run.py         # lanzador (también lo usa PyInstaller)
+
+android/
+  core/        # el mismo proxy en Kotlin puro (RakNet.kt, LanProxy.kt) + pruebas
+  app/         # app Android: pantalla, servicio en primer plano y notificación
 ```
+
+Para abrir la versión Android, abre la carpeta `android/` en Android Studio.
+Para compilar desde la terminal: `cd android && ./gradlew :app:assembleDebug`.
 
 ## Pruebas
 
 ```bash
-python -m unittest discover -v
+python -m unittest discover -v           # versión PC
+cd android && ./gradlew :core:test        # núcleo de la versión Android
 ```
 
 Las pruebas levantan un servidor Bedrock simulado en local y comprueban dos
@@ -119,7 +165,7 @@ consolas a la vez, desconexiones y caídas del servidor).
 
 ## Próximos pasos posibles
 
-- Versión para **Android**, para usar el móvil en lugar del PC, como hace
-  BedrockTogether.
+- Publicar la APK firmada como *Release* en GitHub, para descargarla
+  directamente y actualizar sin desinstalar.
 - Lista de servidores destacados precargada.
-- Inicio automático con el sistema y minimizar a la bandeja.
+- Versión para iPhone.

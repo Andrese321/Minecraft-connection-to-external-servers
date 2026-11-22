@@ -29,6 +29,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Pruebas del núcleo, APK y lint
         run: ./gradlew --no-daemon :core:test :app:assembleDebug :app:lintDebug
+      - name: Informe de lint
+        run: cat app/build/reports/lint-results.txt
       - name: Renombrar APK
         run: cp app/build/outputs/apk/debug/app-debug.apk BedrockLanProxy.apk
       - uses: actions/upload-artifact@v4
