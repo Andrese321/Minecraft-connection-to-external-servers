@@ -7,6 +7,9 @@ on:
       servidor:
         description: "Servidor a comprobar (host:puerto)"
         default: "172.96.172.240:25776"
+      emulador:
+        description: "¿Ejecutar también la prueba de pantalla en el emulador? (true/false)"
+        default: "false"
 
 jobs:
   servidor:
@@ -20,6 +23,7 @@ jobs:
         run: python tools/check_server.py "${{ github.event.inputs.servidor || '172.96.172.240:25776' }}"
 
   pantalla-android:
+    if: ${{ github.event.inputs.emulador == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:

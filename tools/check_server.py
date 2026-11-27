@@ -53,6 +53,23 @@ def java_status(host: str, port: int, timeout: float = 5.0) -> dict:
         return json.loads(data.decode("utf-8", "replace"))
 
 
+def raknet_open_connection(host: str, port: int, timeout: float = 4.0) -> str:
+    """Envía Open Connection Request 1 (como un cliente que quiere entrar). Un servidor RakNet
+    contesta con Open Connection Reply 1 (0x06) aunque ignore los pings."""
+    family, addr = raknet.resolve(host, port)
+    with socket.socket(family, socket.SOCK_DGRAM) as s:
+        s.settimeout(timeout / 3)
+        for mtu in (1400, 1200, 576):
+            pkt = bytes([0x05]) + raknet.MAGIC + bytes([11]) + bytes(mtu - 18 - 28)
+            s.sendto(pkt, addr)
+            try:
+                data, _ = s.recvfrom(4096)
+                return f"RESPONDE (paquete 0x{data[0]:02x}, {len(data)} bytes)"
+            except (socket.timeout, ConnectionResetError):
+                continue
+    return "no responde"
+
+
 def main() -> None:
     for arg in sys.argv[1:]:
         host, port = raknet.parse_address(arg)
@@ -62,6 +79,10 @@ def main() -> None:
             print(f"  Bedrock (UDP): RESPONDE en {ms:.0f} ms -> {info.to_motd()}")
         except Exception as exc:  # noqa: BLE001
             print(f"  Bedrock (UDP): no responde ({exc})")
+        try:
+            print(f"  RakNet (intento de conexión): {raknet_open_connection(host, port)}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  RakNet (intento de conexión): error ({exc})")
         try:
             start = time.monotonic()
             st = java_status(host, port)
