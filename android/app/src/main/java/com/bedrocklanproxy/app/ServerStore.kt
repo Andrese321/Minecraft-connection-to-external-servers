@@ -55,6 +55,10 @@ class ServerStore(context: Context) {
     var transferMode: Boolean
         get() = prefs.getBoolean("transfer_mode", true)
         set(v) = prefs.edit().putBoolean("transfer_mode", v).apply()
+    /** Protocolo que usó la consola la última vez: se anuncia si el servidor no responde al ping. */
+    var lastClientProtocol: Int
+        get() = prefs.getInt("last_client_protocol", 0)
+        set(v) = prefs.edit().putInt("last_client_protocol", v).apply()
     var lastName: String
         get() = prefs.getString("last_name", "") ?: ""
         set(v) = prefs.edit().putString("last_name", v).apply()

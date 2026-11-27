@@ -21,6 +21,7 @@ internal class TransferSession(
     private val targetPort: Int,
     private val send: (ByteArray) -> Unit,
     private val log: (ProxyEvent, String) -> Unit,
+    private val onProtocol: (Int) -> Unit = {},
 ) {
     enum class Outcome { PENDING, TRANSFERRED, IGNORED, CLOSED }
 
@@ -261,6 +262,7 @@ internal class TransferSession(
             when (packet.varUInt() and 0x3FF) {
                 PACKET_REQUEST_NETWORK_SETTINGS -> {
                     clientProtocol = packet.intBE()
+                    onProtocol(clientProtocol)
                     val ns = ByteWriter()
                     ns.varUInt(PACKET_NETWORK_SETTINGS)
                     ns.shortLE(COMPRESSION_THRESHOLD)

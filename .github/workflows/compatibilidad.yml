@@ -1,0 +1,54 @@
+name: Compatibilidad con Minecraft
+
+# Cada semana (y en cada cambio de la app) comprueba la app contra la última versión de
+# bedrock-protocol, que se actualiza cuando sale una versión nueva de Minecraft:
+#  1. que los paquetes que envía la app siguen teniendo el formato correcto, y
+#  2. que una consola de prueba 26.60+ entra por NetherNet y recibe el Transfer.
+# Si una actualización de Minecraft rompe algo, este flujo falla y GitHub avisa por correo.
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  push:
+    paths:
+      - "android/core/**"
+      - "tools/nethernet/**"
+      - ".github/workflows/compatibilidad.yml"
+  workflow_dispatch:
+
+jobs:
+  nethernet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Compilar el núcleo
+        working-directory: android
+        run: |
+          ./gradlew --no-daemon -q :core:testClasses
+          echo "CP=$(./gradlew --no-daemon -q :core:printTestClasspath | tail -1)" >> "$GITHUB_ENV"
+      - name: Instalar la última bedrock-protocol
+        working-directory: tools/nethernet
+        run: |
+          npm install --ignore-scripts bedrock-protocol@latest
+          sh stub-raknet.sh
+          node -e "const o=require('bedrock-protocol/src/options'); console.log('bedrock-protocol', require('bedrock-protocol/package.json').version, '- versión más nueva:', o.CURRENT_VERSION, 'protocolo', o.Versions[o.CURRENT_VERSION])"
+      - name: Formato de los paquetes
+        working-directory: tools/nethernet
+        run: node validate.js
+      - name: Entrada por NetherNet y Transfer
+        working-directory: tools/nethernet
+        run: |
+          java -cp "$CP" com.bedrocklanproxy.core.E2eMainKt 203.0.113.50 19133 0.0.0.0 19170 "Prueba CI" 60000 transfer > proxy.log 2>&1 &
+          sleep 8
+          status=0
+          node join.js 127.0.0.1 || status=$?
+          echo "--- registro de la app ---"
+          cat proxy.log
+          exit $status

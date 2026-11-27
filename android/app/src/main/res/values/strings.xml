@@ -10,9 +10,18 @@
     <string name="test">Probar servidor</string>
     <string name="save">★ Guardar</string>
     <string name="mode_transfer">Transferir (recomendado): la consola se conecta directamente al servidor. La app solo hace falta para entrar.</string>
-    <string name="mode_relay">Puente: todo el tráfico pasa por el teléfono. Deja la app abierta mientras juegas.</string>
+    <string name="mode_relay">Puente (solo consolas anteriores a la 26.60): todo el tráfico pasa por el teléfono. Deja la app abierta mientras juegas.</string>
     <string name="saved_servers">Servidores guardados</string>
     <string name="saved_empty">Todavía no hay servidores guardados. Escribe uno y pulsa «★ Guardar».</string>
     <string name="log">Registro</string>
-    <string name="how_to">Cómo usarlo:\n1. Conecta la consola y este teléfono a la misma red Wi-Fi (o la consola al punto de acceso del teléfono).\n2. Escribe el servidor y pulsa «Iniciar partida LAN».\n3. En la consola: Minecraft → Jugar → Amigos. El servidor aparece en «Partidas LAN».\n\nModo «Transferir»: al entrar, la consola salta directamente al servidor y ya puedes cerrar la app. Si tu consola no acepta la transferencia, la app te lo dirá: vuelve a entrar y esa vez hará de puente.\n\nModo «Puente»: deja la app funcionando mientras juegas (puedes apagar la pantalla).</string>
+    <string name="how_to">Cómo usarlo:
+1. Conecta la consola y este teléfono a la misma red Wi-Fi (o la consola al punto de acceso del teléfono).
+2. Escribe el servidor y pulsa «Iniciar partida LAN».
+3. En la consola: Minecraft → Jugar → Amigos → pulsa la partida LAN.
+
+Modo «Transferir»: la consola entra un momento y salta directamente al servidor. Cuando el registro diga «se ha ido al servidor», ya puedes cerrar la app. Las consolas con Minecraft 26.60 o posterior siempre usan este modo.
+
+Modo «Puente» (solo consolas anteriores a la 26.60): deja la app funcionando mientras juegas (puedes apagar la pantalla).
+
+Si un día deja de funcionar tras una actualización de Minecraft, mira en el registro «La consola usa el protocolo …»: si es un número nuevo, hace falta actualizar la app.</string>
 </resources>

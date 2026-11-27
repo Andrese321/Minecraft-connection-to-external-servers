@@ -39,6 +39,7 @@ class MainActivity : Activity() {
 
     private val refresher = Runnable { refreshLoop() }
     private var lastActive: Boolean? = null
+    private var lastStatus: ProxyHub.Status? = null
     private val hubListener: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -228,9 +229,14 @@ class MainActivity : Activity() {
             )
             st == ProxyHub.Status.ERROR -> info.setIfChanged(ProxyHub.lastError ?: "")
             st == ProxyHub.Status.STARTING -> info.setIfChanged("Haciendo ping a ${host.text}…")
-            st == ProxyHub.Status.STOPPED && info.text.isNullOrEmpty() ->
-                info.setIfChanged("Escribe la IP del servidor y pulsa «Iniciar partida LAN».")
+            // Al detenerse se vuelve al texto inicial (sin borrar el resultado de «Probar servidor»).
+            st == ProxyHub.Status.STOPPED && (info.text.isNullOrEmpty() || (lastStatus != null && lastStatus != st)) ->
+                info.setIfChanged(
+                    if (ProxyHub.transferred > 0) "Detenido. Las consolas que ya entraron siguen jugando en el servidor."
+                    else "Escribe la IP del servidor y pulsa «Iniciar partida LAN».",
+                )
         }
+        lastStatus = st
 
         val localIps = NetUtils.localIps()
         ips.setIfChanged(if (localIps.isEmpty()) {

@@ -51,7 +51,20 @@ class LanProxy(
     /** WebRTC para que las consolas 26.60+ puedan entrar. Sin él solo se anuncia la partida. */
     private val rtcBackend: RtcBackend? = null,
     private val netherNetIdentity: NetherNetIdentity? = null,
+    /** Protocolo que usó la consola la última vez (0 = desconocido). Se anuncia si el servidor no responde. */
+    knownClientProtocol: Int = 0,
+    /** Se llama cuando una consola revela su protocolo, para recordarlo la próxima vez. */
+    private val onClientProtocol: ((Int) -> Unit)? = null,
 ) {
+    @Volatile var clientProtocol: Int = knownClientProtocol
+        private set
+
+    private fun learnProtocol(p: Int) {
+        if (p <= 0 || p == clientProtocol) return
+        clientProtocol = p
+        try { onClientProtocol?.invoke(p) } catch (_: Throwable) {}
+    }
+
     val customName: String? = customName?.takeIf { it.isNotBlank() }
     val guid: Long = RakNet.randomGuid()
 
@@ -346,6 +359,7 @@ class LanProxy(
                     try { lan!!.send(ByteBuffer.wrap(data), client) } catch (_: IOException) {}
                 },
                 log = ::emit,
+                onProtocol = ::learnProtocol,
             )
             transfers[client] = t
             emit(ProxyEvent.JOIN, "Consola conectándose desde ${describe(client)} (modo transferencia)")
@@ -483,6 +497,7 @@ class LanProxy(
                     worldName = customName ?: serverInfo?.name ?: remoteHost,
                     signal = { reply -> sendSignal(from, consoleId, reply) },
                     log = ::emit,
+                    onProtocol = ::learnProtocol,
                 )
                 netherNetSessions[connId] = session
                 emit(ProxyEvent.JOIN, "La consola $who quiere entrar (NetherNet). Conectando…")
@@ -521,9 +536,15 @@ class LanProxy(
         }
     }
 
+    /**
+     * Datos genéricos para anunciar la partida cuando el servidor no responde. Se usa la versión
+     * de la consola si ya se conoce (así la lista LAN la muestra como compatible).
+     */
     private fun fallbackInfo(): ServerInfo = ServerInfo(
         listOf(
-            "MCPE", customName ?: remoteHost, FALLBACK_PROTOCOL, FALLBACK_VERSION, "0", "100", "0",
+            "MCPE", customName ?: remoteHost,
+            if (clientProtocol > 0) clientProtocol.toString() else FALLBACK_PROTOCOL,
+            BedrockVersions.nameFor(clientProtocol) ?: FALLBACK_VERSION, "0", "100", "0",
             "$remoteHost:$remotePort", "Survival", "1", "19132", "19133",
         ),
     )

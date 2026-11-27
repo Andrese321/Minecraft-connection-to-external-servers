@@ -39,6 +39,8 @@ class NetherNetSession(
     /** Envía un texto de señalización a la consola (por el puerto 7551). */
     private val signal: (String) -> Unit,
     private val log: (ProxyEvent, String) -> Unit,
+    /** Se llama con el protocolo de la consola en cuanto se conoce. */
+    private val onProtocol: (Int) -> Unit = {},
 ) {
     enum class State { NEGOTIATING, CONNECTED, TRANSFERRED, FAILED, CLOSED }
 
@@ -170,6 +172,15 @@ class NetherNetSession(
             BedrockPackets.ID_REQUEST_NETWORK_SETTINGS -> {
                 protocol = BedrockPackets.readProtocol(packet)
                 log(ProxyEvent.INFO, "La consola usa el protocolo $protocol.")
+                onProtocol(protocol)
+                if (protocol > BedrockVersions.MAX_SUPPORTED) {
+                    log(
+                        ProxyEvent.ERROR,
+                        "Tu consola tiene una versión de Minecraft más nueva que las comprobadas por la app " +
+                            "(protocolo $protocol > ${BedrockVersions.MAX_SUPPORTED}). Se intenta igualmente; si " +
+                            "no entra, hace falta actualizar la app.",
+                    )
+                }
                 sendBatch(listOf(BedrockPackets.networkSettings(protocol)))
                 compression = true
             }

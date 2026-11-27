@@ -70,8 +70,9 @@ Hay dos versiones que hacen lo mismo:
    origen desconocido** para tu navegador o gestor de archivos.
 4. Requiere Android 8.0 o superior.
 
-> La APK es de depuración y se firma con una clave distinta en cada
-> compilación. Para instalar una versión nueva, desinstala antes la anterior.
+> Todas las versiones se firman con la misma clave, así que una APK nueva se
+> instala encima de la anterior. La cabecera de la app muestra la versión
+> (por ejemplo, v1.1.15).
 
 ### Usar
 
@@ -79,16 +80,35 @@ Hay dos versiones que hacen lo mismo:
    conectar la consola al **punto de acceso** del teléfono.
 2. Abre la app, escribe la IP o el dominio del servidor y pulsa
    **▶ Iniciar partida LAN**. Acepta el permiso de notificaciones.
-3. Cuando el punto se ponga verde, abre Minecraft en la consola → **Jugar** →
-   **Amigos**. El servidor aparece en *Partidas LAN*.
-4. En modo **Transferir**, cuando la consola ya está en el servidor la app lo
-   indica («ya puedes cerrar la app»). En modo **Puente** puedes apagar la
+3. Abre Minecraft en la consola → **Jugar** → **Amigos** y pulsa la partida
+   de *Partidas LAN*.
+4. En modo **Transferir**, la consola carga un momento y entra en el servidor.
+   Cuando el registro diga «se ha ido al servidor», ya puedes cerrar la app.
+   Las consolas con Minecraft **26.60 o posterior** siempre entran así.
+5. En modo **Puente** (solo consolas anteriores a la 26.60) puedes apagar la
    pantalla: la app sigue funcionando y deja una notificación con un botón
    **Detener**.
 
-Si el servidor no responde al ping (está apagado, la IP o el puerto están mal,
-o es un servidor de Java Edition), la partida se anuncia igualmente a los
-4 segundos para que puedas intentar entrar, y la app lo avisa.
+Si el servidor no responde al ping (hay servidores que lo tienen desactivado,
+o puede que esté apagado o que la IP o el puerto estén mal), la partida se
+anuncia igualmente a los 4 segundos para que puedas intentar entrar. La app
+anuncia la versión de Minecraft que usó tu consola la última vez, para que la
+consola la muestre como compatible.
+
+### Cuando Minecraft se actualiza
+
+- Las actualizaciones pequeñas (correcciones como la 26.63) no cambian el
+  protocolo y no afectan.
+- Las grandes cambian el número de protocolo. La app ya contempla los cambios
+  de formato conocidos hasta el **protocolo 2259** (1.26.70).
+- Si un día deja de entrar, mira en el registro **«La consola usa el protocolo
+  …»**. Si es un número mayor que 2259, la app avisa y hace falta actualizarla.
+- El flujo **Compatibilidad con Minecraft** de GitHub Actions se ejecuta cada
+  semana con la última versión de la librería
+  [bedrock-protocol](https://github.com/PrismarineJS/bedrock-protocol):
+  comprueba el formato de los paquetes y simula una consola 26.60+ entrando por
+  NetherNet. Si falla, GitHub envía un correo antes de que lo notes en la
+  consola.
 
 La app también tiene servidores guardados (toca para rellenar, mantén pulsado
 para borrar), **Probar servidor** y un registro de lo que pasa.
@@ -98,6 +118,9 @@ para borrar), **Probar servidor** y un registro de lo que pasa.
 Aplicaciones → Bedrock LAN Proxy → Batería* y elige **Sin restricciones**.
 
 ## Uso rápido en PC
+
+> La versión de PC solo funciona como puente con consolas **anteriores a la
+> 26.60**. Para consolas actualizadas, usa la app de Android.
 
 **Requisito:** el PC con el programa y la consola tienen que estar en **la misma red**
 (el mismo router o Wi-Fi).
@@ -174,8 +197,16 @@ tests/         # pruebas con un servidor Bedrock simulado
 run.py         # lanzador (también lo usa PyInstaller)
 
 android/
-  core/        # el mismo proxy en Kotlin puro (RakNet.kt, LanProxy.kt) + pruebas
-  app/         # app Android: pantalla, servicio en primer plano y notificación
+  core/        # núcleo en Kotlin puro (se prueba en el ordenador):
+               #   RakNet.kt, LanProxy.kt, TransferSession.kt  -> consolas < 26.60
+               #   NetherNet.kt (descubrimiento), NetherNetSession.kt (WebRTC +
+               #   entrada + Transfer), NetherNetIdentity.kt (firma a=identity),
+               #   BedrockPackets.kt (paquetes del juego por versión)
+  app/         # app Android: pantalla, servicio en primer plano, WebRTC (libwebrtc)
+
+tools/
+  check_server.py   # ¿el servidor responde por Bedrock, RakNet o Java?
+  nethernet/        # comprobaciones con bedrock-protocol (formato y entrada NetherNet)
 ```
 
 Para abrir la versión Android, abre la carpeta `android/` en Android Studio.
@@ -188,6 +219,16 @@ python -m unittest discover -v           # versión PC
 cd android && ./gradlew :core:test        # núcleo de la versión Android
 ```
 
+Comprobación con bedrock-protocol (necesita Node.js 24):
+
+```bash
+cd android && ./gradlew -q :core:testClasses && export CP=$(./gradlew -q :core:printTestClasspath | tail -1)
+cd ../tools/nethernet && npm install --ignore-scripts && sh stub-raknet.sh
+node validate.js                          # formato de los paquetes en cada versión 26.x
+java -cp "$CP" com.bedrocklanproxy.core.E2eMainKt 203.0.113.50 19133 0.0.0.0 19170 Prueba 60000 transfer &
+node join.js                              # consola de prueba entrando por NetherNet
+```
+
 Las pruebas levantan un servidor Bedrock simulado en local y comprueban dos
 cosas: que la consola recibe la partida LAN con el nombre y los puertos
 correctos, y que el tráfico de juego se reenvía en los dos sentidos (con varias
@@ -195,7 +236,8 @@ consolas a la vez, desconexiones y caídas del servidor).
 
 ## Próximos pasos posibles
 
-- Publicar la APK firmada como *Release* en GitHub, para descargarla
-  directamente y actualizar sin desinstalar.
+- Publicar la APK como *Release* en GitHub, para descargarla con un enlace
+  fijo.
+- NetherNet en la versión de PC.
 - Lista de servidores destacados precargada.
 - Versión para iPhone.

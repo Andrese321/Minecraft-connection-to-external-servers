@@ -1,0 +1,8 @@
+{
+  "name": "bedrock-lan-proxy-compatibilidad",
+  "private": true,
+  "description": "Comprueba los paquetes y la entrada por NetherNet de la app contra bedrock-protocol",
+  "dependencies": {
+    "bedrock-protocol": "*"
+  }
+}

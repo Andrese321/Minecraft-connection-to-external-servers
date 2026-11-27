@@ -236,6 +236,19 @@ object BedrockPackets {
     }
 }
 
+/** Versiones de Minecraft Bedrock conocidas por la app. */
+object BedrockVersions {
+    /** Protocolo más nuevo cuyos cambios de formato están contemplados en BedrockPackets. */
+    const val MAX_SUPPORTED = 2259
+
+    private val names = mapOf(
+        2168 to "1.26.40", 2169 to "1.26.45", 2193 to "1.26.51", 2225 to "1.26.60", 2259 to "1.26.70",
+    )
+
+    /** Nombre de versión para mostrar en la lista LAN (o null si no se conoce). */
+    fun nameFor(protocol: Int): String? = names[protocol]
+}
+
 /** Escritor con los tipos de Bedrock (little endian salvo que se indique). */
 internal class GameWriter {
     private val out = ByteArrayOutputStream()

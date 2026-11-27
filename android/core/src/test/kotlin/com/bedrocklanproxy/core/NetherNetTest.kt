@@ -65,6 +65,38 @@ class NetherNetTest {
     }
 }
 
+class RememberedProtocolTest {
+    @Test fun advertisesRememberedConsoleProtocolWhenServerIsSilent() {
+        val deadPort = DatagramSocket(0, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        val p = LanProxy(
+            "127.0.0.1", deadPort, listenHost = "127.0.0.1", listenPort = 0, customName = "Hardlands",
+            fallbackAfterMs = 300, netherNetPort = 0, knownClientProtocol = 2259,
+        )
+        p.start()
+        try {
+            val deadline = System.currentTimeMillis() + 3000
+            while (!p.blind && System.currentTimeMillis() < deadline) Thread.sleep(50)
+            DatagramSocket(0, InetAddress.getByName("127.0.0.1")).use { c ->
+                c.soTimeout = 2000
+                val req = NetherNet.encode(NetherNet.TYPE_REQUEST, 1L, ByteArray(0))
+                c.send(DatagramPacket(req, req.size, InetSocketAddress("127.0.0.1", p.netherNetBoundPort)))
+                val buf = ByteArray(2048)
+                val dp = DatagramPacket(buf, buf.size)
+                c.receive(dp)
+                val resp = assertNotNull(NetherNet.decode(buf, dp.length))
+                val hexLen = ByteReaderLE(resp.body).u32()
+                val ad = String(resp.body, 4, hexLen, Charsets.US_ASCII).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                val r = ByteReaderLE(ad)
+                r.u8(); r.string()
+                assertEquals(2259, r.zigzag32())
+                assertEquals("1.26.70", r.string())
+            }
+        } finally {
+            p.stop()
+        }
+    }
+}
+
 /** Lector mínimo para las pruebas. */
 class ByteReaderLE(private val b: ByteArray) {
     private var pos = 0

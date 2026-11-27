@@ -67,6 +67,8 @@ class ProxyService : Service() {
                 listener = { e, m -> ProxyHub.onProxyEvent(proxy, e, m) },
                 rtcBackend = AndroidRtcBackend(this),
                 netherNetIdentity = NetherNetIdentity.loadOrCreate(java.io.File(filesDir, "nethernet-identity.key")),
+                knownClientProtocol = ServerStore(this).lastClientProtocol,
+                onClientProtocol = { p -> ServerStore(this).lastClientProtocol = p },
             )
             synchronized(this) {
                 if (myGeneration != generation) return@thread
