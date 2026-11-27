@@ -11,12 +11,13 @@ en ella, la app te lleva al servidor real.
 
 *Captura hecha con un servidor de prueba local.*
 
-> ⚠️ **Limitación actual:** desde la versión **26.60** de Minecraft Bedrock
-> (octubre de 2026), las consolas buscan y abren las partidas LAN con un
-> protocolo nuevo, *NetherNet* (WebRTC, puerto UDP 7551), en lugar de RakNet
-> (puerto 19132). Esta app todavía solo habla RakNet, así que **las consolas
-> con la versión 26.60 o posterior no ven la partida LAN**. Funciona con
-> versiones hasta la 26.5x.
+> ⚠️ **Consolas con la versión 26.60 o posterior:** desde la 26.60 (octubre
+> de 2026) Minecraft Bedrock busca y abre las partidas LAN con un protocolo
+> nuevo, *NetherNet* (WebRTC, puerto UDP 7551), en lugar de RakNet (puerto
+> 19132). La app de Android ya **responde a la búsqueda de NetherNet**, así que
+> la partida debería aparecer en esas consolas, pero **entrar todavía no
+> funciona**: falta la conexión por WebRTC (fase 2). Con versiones hasta la
+> 26.5x funciona todo.
 
 ## Cómo funciona
 

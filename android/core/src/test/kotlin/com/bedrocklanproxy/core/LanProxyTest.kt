@@ -26,7 +26,7 @@ class LanProxyTest {
         val p = LanProxy(
             "127.0.0.1", serverPort, listenHost = "127.0.0.1", listenPort = 0, customName = name,
             listener = { e, _ -> events.add(e) }, pingIntervalMs = 200, sessionTimeoutMs = sessionTimeoutMs,
-            fallbackAfterMs = 1000,
+            fallbackAfterMs = 1000, netherNetPort = 0,
         )
         p.start()
         cleanups += { p.stop() }

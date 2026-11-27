@@ -46,6 +46,8 @@ class LanProxy(
     /** Si el servidor no responde al ping en este tiempo, se anuncia la partida igualmente. */
     private val fallbackAfterMs: Long = 4000,
     val mode: ProxyMode = ProxyMode.RELAY,
+    /** Puerto del descubrimiento NetherNet (consolas 26.60+). 0 = aleatorio (pruebas), -1 = desactivado. */
+    private val netherNetPort: Int = NetherNet.DISCOVERY_PORT,
 ) {
     val customName: String? = customName?.takeIf { it.isNotBlank() }
     val guid: Long = RakNet.randomGuid()
@@ -77,9 +79,18 @@ class LanProxy(
     private val transfers = HashMap<SocketAddress, TransferSession>()
     /** Consolas que ignoraron la transferencia: hasta cuándo usan el modo puente. */
     private val relayFallback = HashMap<java.net.InetAddress, Long>()
-    private val searchLogged = HashMap<java.net.InetAddress, Long>()
+    private val searchLogged = HashMap<String, Long>()
+    private var pendingWarning: String? = null
     private var lan: DatagramChannel? = null
     private var status: DatagramChannel? = null
+    private var netherNet: DatagramChannel? = null
+    /** Identificador de este "servidor" en NetherNet. */
+    val netherNetId: Long = RakNet.randomGuid() and Long.MAX_VALUE
+    private val netherNetNonce: String = (1..16).joinToString("") { "%02x".format(RakNet.randomGuid().toInt() and 0xFF) }
+    private var netherNetJoinLogged = false
+    /** Puerto real del descubrimiento NetherNet (o -1 si no se pudo abrir). */
+    @Volatile var netherNetBoundPort: Int = -1
+        private set
     private var selector: Selector? = null
     @Volatile private var thread: Thread? = null
     @Volatile private var stopRequested = false
@@ -119,6 +130,23 @@ class LanProxy(
         val sel = Selector.open()
         lanChannel.register(sel, SelectionKey.OP_READ, TAG_LAN)
         statusChannel.register(sel, SelectionKey.OP_READ, TAG_STATUS)
+        netherNet = null
+        netherNetBoundPort = -1
+        netherNetJoinLogged = false
+        if (netherNetPort >= 0) {
+            try {
+                val nn = DatagramChannel.open(StandardProtocolFamily.INET).apply {
+                    bind(InetSocketAddress(listenHost, netherNetPort))
+                    configureBlocking(false)
+                }
+                nn.register(sel, SelectionKey.OP_READ, TAG_NETHERNET)
+                netherNet = nn
+                netherNetBoundPort = (nn.localAddress as InetSocketAddress).port
+            } catch (e: IOException) {
+                pendingWarning = "No se pudo abrir el puerto UDP $netherNetPort para las consolas 26.60+ " +
+                    "(${e.message}). Solo te verán las consolas con versiones anteriores."
+            }
+        }
 
         lan = lanChannel
         status = statusChannel
@@ -132,8 +160,10 @@ class LanProxy(
         thread = Thread(::run, "LanProxy").apply { isDaemon = true; start() }
         emit(
             ProxyEvent.INFO,
-            "Proxy iniciado en el puerto $listenPort -> $remoteHost:$remotePort (${remote.address.hostAddress})",
+            "Proxy iniciado en el puerto $listenPort -> $remoteHost:$remotePort (${remote.address.hostAddress})" +
+                if (netherNetBoundPort > 0) ". Escuchando también a consolas 26.60+ (NetherNet, puerto $netherNetBoundPort)." else "",
         )
+        pendingWarning?.let { emit(ProxyEvent.ERROR, it); pendingWarning = null }
     }
 
     fun stop(timeoutMs: Long = 3000) {
@@ -196,6 +226,7 @@ class LanProxy(
                     when (val tag = key.attachment()) {
                         TAG_LAN -> readLan(sel)
                         TAG_STATUS -> readStatus()
+                        TAG_NETHERNET -> readNetherNet()
                         is Session -> readSession(tag)
                     }
                 }
@@ -207,6 +238,7 @@ class LanProxy(
             sessions.clear()
             closeQuietly(lan)
             closeQuietly(status)
+            closeQuietly(netherNet)
             try { sel.close() } catch (_: IOException) {}
             online = false
             emit(ProxyEvent.STOPPED, "Proxy detenido")
@@ -361,21 +393,64 @@ class LanProxy(
     }
 
     /** Anota (como mucho cada 30 s por dispositivo) que alguien está buscando partidas LAN. */
-    private fun logSearch(client: SocketAddress, info: ServerInfo?) {
+    private fun logSearch(client: SocketAddress, info: ServerInfo?, system: String = "RakNet") {
         val ip = (client as? InetSocketAddress)?.address ?: return
         val now = System.nanoTime()
-        if (now - (searchLogged[ip] ?: Long.MIN_VALUE / 2) < 30_000_000_000L) return
-        searchLogged[ip] = now
+        val key = "$system/${ip.hostAddress}"
+        if (now - (searchLogged[key] ?: Long.MIN_VALUE / 2) < 30_000_000_000L) return
+        searchLogged[key] = now
         val who = ip.hostAddress
         emit(
             ProxyEvent.INFO,
             if (info == null) {
-                "La consola $who está buscando partidas LAN (aún no se anuncia: esperando al servidor)."
+                "La consola $who está buscando partidas LAN [$system] (aún no se anuncia: esperando al servidor)."
             } else {
-                "La consola $who está buscando partidas LAN: respondiendo como «${customName ?: info.name}» " +
+                "La consola $who está buscando partidas LAN [$system]: respondiendo como «${customName ?: info.name}» " +
                     "(versión ${info.version}, protocolo ${info.protocol})."
             },
         )
+    }
+
+    // Descubrimiento NetherNet (consolas 26.60+) ---------------------------------
+
+    private fun readNetherNet() {
+        val channel = netherNet ?: return
+        repeat(MAX_READS_PER_WAKE) {
+            val (from, n) = receive(channel) ?: return
+            val packet = NetherNet.decode(bytes, n) ?: return@repeat
+            when (packet.type) {
+                NetherNet.TYPE_REQUEST -> {
+                    val info = serverInfo ?: if (blind) fallbackInfo() else null
+                    logSearch(from, info, "NetherNet")
+                    if (info == null) return@repeat
+                    val ad = NetherNet.advertisement(
+                        name = customName ?: info.name,
+                        protocol = info.protocol.toIntOrNull() ?: FALLBACK_PROTOCOL.toInt(),
+                        gameVersion = info.version,
+                        levelName = info.levelName.ifBlank { "$remoteHost:$remotePort" },
+                        players = info.players.toIntOrNull() ?: 0,
+                        maxPlayers = info.maxPlayers.toIntOrNull()?.takeIf { it > 0 } ?: 100,
+                        gamemode = if (info.gamemode.equals("Creative", ignoreCase = true)) 1 else 0,
+                        nonce = netherNetNonce,
+                    )
+                    val reply = NetherNet.encode(NetherNet.TYPE_RESPONSE, netherNetId, NetherNet.responseBody(ad))
+                    try { channel.send(ByteBuffer.wrap(reply), from) } catch (_: IOException) {}
+                }
+                NetherNet.TYPE_MESSAGE -> {
+                    val (recipient, text) = NetherNet.parseMessage(packet.body) ?: return@repeat
+                    if (recipient != netherNetId || netherNetJoinLogged) return@repeat
+                    if (text.startsWith("CONNECTREQUEST")) {
+                        netherNetJoinLogged = true
+                        emit(
+                            ProxyEvent.INFO,
+                            "¡La consola ${(from as? InetSocketAddress)?.address?.hostAddress} pulsó la partida! " +
+                                "(NetherNet). Entrar por este sistema todavía no está disponible en esta versión " +
+                                "de la app: la partida ya se ve, que era lo que se quería comprobar.",
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun fallbackInfo(): ServerInfo = ServerInfo(
@@ -442,6 +517,7 @@ class LanProxy(
         const val MAX_READS_PER_WAKE = 512
         const val TAG_LAN = "lan"
         const val TAG_STATUS = "status"
+        const val TAG_NETHERNET = "nethernet"
         const val TRANSFER_IDLE_NS = 20_000_000_000L
         const val RELAY_FALLBACK_NS = 10 * 60 * 1_000_000_000L
         // Versión reciente de Bedrock para anunciar la partida si el servidor no responde al ping.
