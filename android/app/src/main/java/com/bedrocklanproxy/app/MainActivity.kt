@@ -133,13 +133,20 @@ class MainActivity : Activity() {
         btnTest.isEnabled = false
         ProxyHub.append("Probando $h:$p…")
         thread {
-            val message = try {
+            val ping = try {
                 val r = RakNet.query(h, p)
-                "✔ ${r.info.name} | ${r.info.levelName} | versión ${r.info.version} | " +
+                "✔ Ping: ${r.info.name} | ${r.info.levelName} | versión ${r.info.version} | " +
                     "${r.info.players}/${r.info.maxPlayers} jugadores | ${r.latencyMs} ms"
             } catch (e: Exception) {
-                "✖ $h no responde: ${e.message}"
+                "✖ Ping: $h no responde (${e.message})"
             }
+            val connect = try {
+                RakNet.probeConnection(h, p)?.let { "✔ Conexión RakNet: el servidor acepta conexiones ($it ms)" }
+                    ?: "✖ Conexión RakNet: el servidor no contesta a un intento de conexión"
+            } catch (e: Exception) {
+                "✖ Conexión RakNet: error (${e.message})"
+            }
+            val message = "$ping\n$connect"
             ProxyHub.append(message)
             runOnUiThread {
                 btnTest.isEnabled = true

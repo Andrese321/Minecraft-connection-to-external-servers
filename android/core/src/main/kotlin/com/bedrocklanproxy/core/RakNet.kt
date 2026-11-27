@@ -124,6 +124,35 @@ object RakNet {
 
     data class QueryResult(val info: ServerInfo, val latencyMs: Long)
 
+    /**
+     * Intenta iniciar una conexión RakNet (Open Connection Request 1), como hace un jugador al
+     * entrar. Un servidor RakNet responde aunque tenga los pings desactivados. Devuelve el
+     * tiempo de respuesta en ms, o null si no contesta.
+     */
+    fun probeConnection(host: String, port: Int = DEFAULT_PORT, timeoutMs: Int = 3000): Long? {
+        val addr = resolve(host, port)
+        DatagramSocket().use { socket ->
+            socket.soTimeout = maxOf(timeoutMs / 3, 200)
+            val buf = ByteArray(2048)
+            for (mtu in intArrayOf(1400, 1200, 576)) {
+                val pkt = ByteArray(mtu - 28)
+                pkt[0] = 0x05
+                System.arraycopy(MAGIC, 0, pkt, 1, MAGIC.size)
+                pkt[17] = 11 // versión del protocolo RakNet
+                val start = System.nanoTime()
+                socket.send(DatagramPacket(pkt, pkt.size, addr))
+                try {
+                    val packet = DatagramPacket(buf, buf.size)
+                    socket.receive(packet)
+                    return (System.nanoTime() - start) / 1_000_000
+                } catch (_: SocketTimeoutException) {
+                    // probar con un paquete más pequeño
+                }
+            }
+        }
+        return null
+    }
+
     /** Hace ping a un servidor Bedrock (bloqueante). Lanza excepción si no responde. */
     fun query(host: String, port: Int = DEFAULT_PORT, timeoutMs: Int = 3000, attempts: Int = 3): QueryResult {
         val addr = resolve(host, port)
