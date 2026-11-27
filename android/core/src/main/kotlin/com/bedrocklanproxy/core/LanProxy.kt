@@ -48,6 +48,9 @@ class LanProxy(
     val mode: ProxyMode = ProxyMode.RELAY,
     /** Puerto del descubrimiento NetherNet (consolas 26.60+). 0 = aleatorio (pruebas), -1 = desactivado. */
     private val netherNetPort: Int = NetherNet.DISCOVERY_PORT,
+    /** WebRTC para que las consolas 26.60+ puedan entrar. Sin él solo se anuncia la partida. */
+    private val rtcBackend: RtcBackend? = null,
+    private val netherNetIdentity: NetherNetIdentity? = null,
 ) {
     val customName: String? = customName?.takeIf { it.isNotBlank() }
     val guid: Long = RakNet.randomGuid()
@@ -88,6 +91,8 @@ class LanProxy(
     val netherNetId: Long = RakNet.randomGuid() and Long.MAX_VALUE
     private val netherNetNonce: String = (1..16).joinToString("") { "%02x".format(RakNet.randomGuid().toInt() and 0xFF) }
     private var netherNetJoinLogged = false
+    private val netherNetSessions = java.util.concurrent.ConcurrentHashMap<String, NetherNetSession>()
+    private val identity: NetherNetIdentity by lazy { netherNetIdentity ?: NetherNetIdentity.generate() }
     /** Puerto real del descubrimiento NetherNet (o -1 si no se pudo abrir). */
     @Volatile var netherNetBoundPort: Int = -1
         private set
@@ -213,6 +218,7 @@ class LanProxy(
                     )
                 }
                 if (transfers.isNotEmpty()) tickTransfers(now)
+                if (netherNetSessions.isNotEmpty()) tickNetherNet(now)
                 if (now >= nextCleanup) {
                     cleanup(now)
                     nextCleanup = now + 1_000_000_000L
@@ -238,6 +244,8 @@ class LanProxy(
             sessions.clear()
             closeQuietly(lan)
             closeQuietly(status)
+            netherNetSessions.values.forEach { it.close() }
+            netherNetSessions.clear()
             closeQuietly(netherNet)
             try { sel.close() } catch (_: IOException) {}
             online = false
@@ -438,16 +446,76 @@ class LanProxy(
                 }
                 NetherNet.TYPE_MESSAGE -> {
                     val (recipient, text) = NetherNet.parseMessage(packet.body) ?: return@repeat
-                    if (recipient != netherNetId || netherNetJoinLogged) return@repeat
-                    if (text.startsWith("CONNECTREQUEST")) {
-                        netherNetJoinLogged = true
-                        emit(
-                            ProxyEvent.INFO,
-                            "¡La consola ${(from as? InetSocketAddress)?.address?.hostAddress} pulsó la partida! " +
-                                "(NetherNet). Entrar por este sistema todavía no está disponible en esta versión " +
-                                "de la app: la partida ya se ve, que era lo que se quería comprobar.",
-                        )
-                    }
+                    if (recipient != netherNetId) return@repeat
+                    handleSignal(from, packet.senderId, text)
+                }
+            }
+        }
+    }
+
+    /** Señalización NetherNet: "TIPO idConexión datos". */
+    private fun handleSignal(from: SocketAddress, consoleId: Long, text: String) {
+        val firstSpace = text.indexOf(' ')
+        if (firstSpace < 0) return // "Ping" u otros mensajes sin datos
+        val type = text.substring(0, firstSpace)
+        val rest = text.substring(firstSpace + 1)
+        val secondSpace = rest.indexOf(' ')
+        val connId = if (secondSpace < 0) rest else rest.substring(0, secondSpace)
+        val data = if (secondSpace < 0) "" else rest.substring(secondSpace + 1)
+        val who = (from as? InetSocketAddress)?.address?.hostAddress ?: from.toString()
+
+        if (rtcBackend == null) {
+            if (type == "CONNECTREQUEST" && !netherNetJoinLogged) {
+                netherNetJoinLogged = true
+                emit(ProxyEvent.INFO, "¡La consola $who pulsó la partida! (NetherNet), pero esta versión no puede recibirla.")
+            }
+            return
+        }
+        when (type) {
+            "CONNECTREQUEST" -> {
+                if (netherNetSessions.containsKey(connId)) return
+                val session = NetherNetSession(
+                    connectionId = connId,
+                    backend = rtcBackend,
+                    identity = identity,
+                    targetHost = remoteHost,
+                    targetPort = remotePort,
+                    worldName = customName ?: serverInfo?.name ?: remoteHost,
+                    signal = { reply -> sendSignal(from, consoleId, reply) },
+                    log = ::emit,
+                )
+                netherNetSessions[connId] = session
+                emit(ProxyEvent.JOIN, "La consola $who quiere entrar (NetherNet). Conectando…")
+                session.onConnectRequest(data)
+            }
+            "CANDIDATEADD" -> netherNetSessions[connId]?.onCandidateAdd(data)
+            "CONNECTERROR" -> netherNetSessions[connId]?.onConnectError(data)
+        }
+    }
+
+    private fun sendSignal(to: SocketAddress, consoleId: Long, text: String) {
+        val channel = netherNet ?: return
+        val pkt = NetherNet.encode(NetherNet.TYPE_MESSAGE, netherNetId, NetherNet.messageBody(consoleId, text))
+        try {
+            synchronized(channel) { channel.send(ByteBuffer.wrap(pkt), to) }
+        } catch (_: IOException) {
+        }
+    }
+
+    private fun tickNetherNet(now: Long) {
+        for ((id, s) in netherNetSessions) {
+            s.tick(now)
+            if (s.finished) {
+                netherNetSessions.remove(id)
+                when (s.state) {
+                    NetherNetSession.State.TRANSFERRED -> emit(
+                        ProxyEvent.TRANSFERRED,
+                        "La consola se ha ido al servidor. Ya puedes cerrar la app (solo hace falta para volver a entrar).",
+                    )
+                    NetherNetSession.State.CLOSED ->
+                        if (s.transferSent) emit(ProxyEvent.TRANSFERRED, "La consola se ha ido al servidor. Ya puedes cerrar la app.")
+                        else emit(ProxyEvent.LEAVE, "La consola cerró la conexión NetherNet antes de transferirse.")
+                    else -> Unit
                 }
             }
         }

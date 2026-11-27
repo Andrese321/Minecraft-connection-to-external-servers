@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import com.bedrocklanproxy.core.LanProxy
+import com.bedrocklanproxy.core.NetherNetIdentity
 import com.bedrocklanproxy.core.ProxyMode
 import com.bedrocklanproxy.core.ProxyException
 import com.bedrocklanproxy.core.RakNet
@@ -64,6 +65,8 @@ class ProxyService : Service() {
             proxy = LanProxy(
                 host, port, customName = name, mode = mode,
                 listener = { e, m -> ProxyHub.onProxyEvent(proxy, e, m) },
+                rtcBackend = AndroidRtcBackend(this),
+                netherNetIdentity = NetherNetIdentity.loadOrCreate(java.io.File(filesDir, "nethernet-identity.key")),
             )
             synchronized(this) {
                 if (myGeneration != generation) return@thread

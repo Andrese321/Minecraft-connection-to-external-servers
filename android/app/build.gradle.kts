@@ -17,6 +17,8 @@ android {
         versionCode = buildNumber
         versionName = "1.1.$buildNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // WebRTC trae librerías nativas grandes: solo las de teléfonos reales (ARM).
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -54,6 +56,8 @@ android {
 
 dependencies {
     implementation(project(":core"))
+    // WebRTC (libwebrtc de Google) para recibir a las consolas 26.60+ por NetherNet.
+    implementation("io.github.webrtc-sdk:android:150.7871.09")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:core:1.6.1")
